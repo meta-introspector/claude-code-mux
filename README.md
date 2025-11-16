@@ -117,7 +117,7 @@ Configure models with priority-based fallback routing.
 ![Models](docs/images/models.png)
 
 ### Router Configuration
-Set up intelligent routing rules with auto-save functionality.
+Set up intelligent routing rules.
 
 ![Routing](docs/images/routing.png)
 
