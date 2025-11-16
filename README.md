@@ -152,10 +152,56 @@ All providers support **automatic format translation**, **streaming**, and **fai
 
 ## Installation
 
-### Prerequisites
+### Option 1: Download Pre-built Binaries (Recommended)
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/9j/claude-code-mux/releases/latest).
+
+#### Linux (x86_64)
+```bash
+# Download and extract (glibc)
+curl -L https://github.com/9j/claude-code-mux/releases/latest/download/ccm-linux-x86_64.tar.gz | tar xz
+
+# Or download musl version (static linking, more portable)
+curl -L https://github.com/9j/claude-code-mux/releases/latest/download/ccm-linux-x86_64-musl.tar.gz | tar xz
+
+# Move to PATH
+sudo mv ccm /usr/local/bin/
+```
+
+#### macOS (Intel)
+```bash
+# Download and extract
+curl -L https://github.com/9j/claude-code-mux/releases/latest/download/ccm-macos-x86_64.tar.gz | tar xz
+
+# Move to PATH
+sudo mv ccm /usr/local/bin/
+```
+
+#### macOS (Apple Silicon)
+```bash
+# Download and extract
+curl -L https://github.com/9j/claude-code-mux/releases/latest/download/ccm-macos-aarch64.tar.gz | tar xz
+
+# Move to PATH
+sudo mv ccm /usr/local/bin/
+```
+
+#### Windows
+1. Download [ccm-windows-x86_64.zip](https://github.com/9j/claude-code-mux/releases/latest/download/ccm-windows-x86_64.zip)
+2. Extract the ZIP file
+3. Add the directory containing `ccm.exe` to your PATH
+
+#### Verify Installation
+```bash
+ccm --version
+```
+
+### Option 2: Build from Source
+
+#### Prerequisites
 - Rust 1.70+ (install from [rustup.rs](https://rustup.rs/))
 
-### Build from Source
+#### Build Steps
 
 ```bash
 # Clone the repository
@@ -168,7 +214,7 @@ cargo build --release
 # The binary will be available at target/release/ccm
 ```
 
-### Optional: Install to PATH
+#### Install to PATH (Optional)
 
 ```bash
 # Copy to /usr/local/bin for global access
@@ -178,7 +224,7 @@ sudo cp target/release/ccm /usr/local/bin/
 export PATH="$PATH:/path/to/claude-code-mux/target/release"
 ```
 
-### Run Directly (Without Installing)
+#### Run Directly Without Installing (Optional)
 
 ```bash
 # From the project directory
