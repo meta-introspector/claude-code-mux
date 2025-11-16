@@ -7,9 +7,13 @@
 
 **Performance**: ~5MB RAM · <1ms routing · 1000+ req/s · Zero config overhead
 
-⚡️ **Multi-model intelligence with provider resilience**
+---
 
-Use Minimax M2 for speed, GLM 4.6 for cost optimization, Kimi K2 Thinking for reasoning—all in the same session. When your primary provider goes down, it automatically falls back to your backup.
+OpenRouter met Claude Code Router. They had a baby.
+
+Now your coding assistant can use GLM 4.6 for one task, Kimi K2 Thinking for another, and Minimax M2 for a third. All in the same session. When your primary provider goes down, it falls back to your backup automatically.
+
+⚡️ **Multi-model intelligence with provider resilience**
 
 A lightweight, Rust-powered proxy that provides intelligent model routing, provider failover, streaming support, and full Anthropic API compatibility for Claude Code.
 
