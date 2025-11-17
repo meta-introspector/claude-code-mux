@@ -1,9 +1,11 @@
 mod openai_compat;
+mod oauth_handlers;
 
 use crate::cli::AppConfig;
 use crate::models::AnthropicRequest;
 use crate::router::Router;
 use crate::providers::ProviderRegistry;
+use crate::auth::TokenStore;
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
@@ -24,15 +26,25 @@ pub struct AppState {
     pub config: AppConfig,
     pub router: Router,
     pub provider_registry: Arc<ProviderRegistry>,
+    pub token_store: TokenStore,
 }
 
 /// Start the HTTP server
 pub async fn start_server(config: AppConfig) -> anyhow::Result<()> {
     let router = Router::new(config.clone());
 
-    // Initialize provider registry from config
+    // Initialize OAuth token store FIRST (needed by provider registry)
+    let token_store = TokenStore::default()
+        .map_err(|e| anyhow::anyhow!("Failed to initialize token store: {}", e))?;
+
+    let existing_tokens = token_store.list_providers();
+    if !existing_tokens.is_empty() {
+        info!("🔐 Loaded {} OAuth tokens from storage", existing_tokens.len());
+    }
+
+    // Initialize provider registry from config (with token store)
     let provider_registry = Arc::new(
-        ProviderRegistry::from_configs(&config.providers)
+        ProviderRegistry::from_configs(&config.providers, Some(token_store.clone()))
             .map_err(|e| anyhow::anyhow!("Failed to initialize provider registry: {}", e))?
     );
 
@@ -45,6 +57,7 @@ pub async fn start_server(config: AppConfig) -> anyhow::Result<()> {
         config: config.clone(),
         router,
         provider_registry,
+        token_store,
     });
 
     // Build router
@@ -62,6 +75,12 @@ pub async fn start_server(config: AppConfig) -> anyhow::Result<()> {
         .route("/api/config/json", get(get_config_json))
         .route("/api/config/json", post(update_config_json))
         .route("/api/restart", post(restart_server))
+        // OAuth endpoints
+        .route("/api/oauth/authorize", post(oauth_handlers::oauth_authorize))
+        .route("/api/oauth/exchange", post(oauth_handlers::oauth_exchange))
+        .route("/api/oauth/tokens", get(oauth_handlers::oauth_list_tokens))
+        .route("/api/oauth/tokens/delete", post(oauth_handlers::oauth_delete_token))
+        .route("/api/oauth/tokens/refresh", post(oauth_handlers::oauth_refresh_token))
         .with_state(state);
 
     // Bind to address

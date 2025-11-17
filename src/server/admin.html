@@ -886,22 +886,146 @@
                                 </div>
                             </div>
 
-                            <!-- Step 3: API Key -->
+                            <!-- Step 3: Authentication -->
                             <div class="card">
                                 <h2 class="text-2xl font-bold mb-8">
-                                    Enter API key
+                                    Choose authentication method
                                 </h2>
-                                <div>
+
+                                <!-- Auth Type Selector -->
+                                <div class="mb-8">
+                                    <div class="grid grid-cols-2 gap-4">
+                                        <label class="cursor-pointer">
+                                            <input
+                                                type="radio"
+                                                name="auth_type"
+                                                value="apikey"
+                                                class="peer sr-only"
+                                                checked
+                                                onchange="toggleAuthMethod()"
+                                            />
+                                            <div
+                                                class="p-6 border-2 border-gray-200 rounded-xl peer-checked:border-blue-600 peer-checked:bg-blue-50 hover:border-gray-300 transition-all"
+                                            >
+                                                <div class="text-lg font-bold mb-1">
+                                                    API Key
+                                                </div>
+                                                <div class="text-sm text-gray-600">
+                                                    Use your API key for authentication
+                                                </div>
+                                            </div>
+                                        </label>
+                                        <label class="cursor-pointer">
+                                            <input
+                                                type="radio"
+                                                name="auth_type"
+                                                value="oauth"
+                                                class="peer sr-only"
+                                                onchange="toggleAuthMethod()"
+                                            />
+                                            <div
+                                                class="p-6 border-2 border-gray-200 rounded-xl peer-checked:border-blue-600 peer-checked:bg-blue-50 hover:border-gray-300 transition-all"
+                                            >
+                                                <div class="text-lg font-bold mb-1">
+                                                    OAuth (Claude Pro/Max)
+                                                </div>
+                                                <div class="text-sm text-gray-600">
+                                                    Free for Claude Max subscribers
+                                                </div>
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <!-- API Key Input (shown by default) -->
+                                <div id="api-key-section">
                                     <label class="label">API Key</label>
                                     <input
                                         type="password"
+                                        id="api-key-input"
                                         name="api_key"
                                         class="input-field font-mono"
                                         placeholder="sk-ant-..."
-                                        required
                                     />
                                     <div class="helper-text">
                                         Your API key will be stored securely
+                                    </div>
+                                </div>
+
+                                <!-- OAuth Section (hidden by default) -->
+                                <div id="oauth-section" class="hidden">
+                                    <div class="bg-purple-50 border-2 border-purple-200 rounded-xl p-6 mb-4">
+                                        <div class="flex items-start gap-4">
+                                            <div class="text-3xl">🔐</div>
+                                            <div class="flex-1">
+                                                <h3 class="font-bold text-lg mb-2">OAuth Authentication</h3>
+
+                                                <!-- Step 1: Initial state -->
+                                                <div id="oauth-step-1">
+                                                    <p class="text-sm text-gray-700 mb-4">
+                                                        Click the button below to authenticate with your Claude Pro/Max account.
+                                                    </p>
+                                                    <button
+                                                        type="button"
+                                                        onclick="startOAuthFlow()"
+                                                        class="btn-primary"
+                                                    >
+                                                        🔐 Start OAuth Login
+                                                    </button>
+                                                </div>
+
+                                                <!-- Step 2: Waiting for code -->
+                                                <div id="oauth-step-2" class="hidden">
+                                                    <div class="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 mb-4">
+                                                        <p class="text-sm text-blue-900 mb-2 font-semibold">
+                                                            ✓ Authorization window opened
+                                                        </p>
+                                                        <ol class="text-sm text-blue-800 space-y-1 ml-4 list-decimal">
+                                                            <li>Log in to your Claude Pro/Max account</li>
+                                                            <li>Click "Allow" to authorize</li>
+                                                            <li>Copy the authorization code</li>
+                                                            <li>Paste it in the field below</li>
+                                                        </ol>
+                                                    </div>
+                                                    <label class="label">Authorization Code</label>
+                                                    <input
+                                                        type="text"
+                                                        id="oauth-code-input"
+                                                        class="input-field font-mono"
+                                                        placeholder="Paste the code here..."
+                                                    />
+                                                    <div class="flex gap-2 mt-4">
+                                                        <button
+                                                            type="button"
+                                                            onclick="completeOAuthFlow()"
+                                                            class="btn-primary flex-1"
+                                                        >
+                                                            Complete Authentication
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onclick="cancelOAuthFlow()"
+                                                            class="btn-secondary"
+                                                        >
+                                                            Cancel
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                <!-- Step 3: Success -->
+                                                <div id="oauth-step-3" class="hidden">
+                                                    <div class="flex items-center gap-2 text-green-600">
+                                                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                                                        </svg>
+                                                        <span class="font-semibold">OAuth token saved!</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="helper-text">
+                                        For Claude Pro/Max subscribers only. Requires active subscription.
                                     </div>
                                 </div>
                             </div>
@@ -1300,6 +1424,30 @@
                                         Models matching this regex will use the
                                         background model. Leave empty to use
                                         default ((?i)claude.*haiku).
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- OAuth Tokens Management -->
+                        <div class="card">
+                            <h2 class="text-xl font-bold mb-4">
+                                OAuth Tokens
+                            </h2>
+                            <p class="text-gray-600 mb-6">
+                                Manage your Claude Pro/Max OAuth authentication tokens
+                            </p>
+                            <div id="oauth-tokens-container">
+                                <div id="oauth-tokens-loading" class="text-center py-8">
+                                    <div class="text-gray-500">Loading OAuth tokens...</div>
+                                </div>
+                                <div id="oauth-tokens-list" class="space-y-4 hidden">
+                                    <!-- OAuth tokens will be rendered here -->
+                                </div>
+                                <div id="oauth-tokens-empty" class="text-center py-8 hidden">
+                                    <div class="text-gray-500 mb-4">No OAuth tokens found</div>
+                                    <p class="text-sm text-gray-600 mb-4">
+                                        Add a provider with OAuth authentication to see tokens here
                                     </p>
                                 </div>
                             </div>
@@ -1822,6 +1970,9 @@
                 if (backgroundRegexInput) {
                     backgroundRegexInput.value = router.background_regex || "";
                 }
+
+                // Load OAuth tokens
+                loadOAuthTokens();
             }
 
             // Provider Management
@@ -1848,6 +1999,15 @@
                         const providerCard = document.createElement("div");
                         providerCard.className = "card fade-in";
                         providerCard.id = `provider-card-${index}`;
+                        const authType = provider.auth_type || 'apikey';
+                        const isOAuth = authType === 'oauth';
+                        const authBadge = isOAuth
+                            ? '<span class="px-2 py-1 bg-purple-50 text-purple-600 rounded-full text-xs font-semibold">OAuth</span>'
+                            : '<span class="px-2 py-1 bg-gray-50 text-gray-600 rounded-full text-xs font-semibold">API Key</span>';
+                        const authStatus = isOAuth
+                            ? 'OAuth authenticated'
+                            : 'API key registered';
+
                         providerCard.innerHTML = `
                         <div class="flex items-start justify-between">
                             <div class="flex-1">
@@ -1856,10 +2016,11 @@
                                     <span class="px-3 py-1 ${provider.enabled ? "bg-blue-50 text-blue-600" : "bg-gray-100 text-gray-500"} rounded-full text-sm font-semibold">
                                         ${provider.enabled ? "Active" : "Inactive"}
                                     </span>
+                                    ${authBadge}
                                 </div>
                                 <p class="text-gray-600 mb-4">${escapeHtml(provider.provider_type)}</p>
                                 <div class="text-sm text-gray-500">
-                                    API key registered
+                                    ${authStatus}
                                 </div>
                             </div>
                             <div class="flex gap-2">
@@ -1880,6 +2041,16 @@
                 const providerCard = document.createElement("div");
                 providerCard.className = "card fade-in";
                 providerCard.id = `provider-card-${index}`;
+
+                const authType = provider.auth_type || 'apikey';
+                const isOAuth = authType === 'oauth';
+                const authBadge = isOAuth
+                    ? '<span class="px-2 py-1 bg-purple-50 text-purple-600 rounded-full text-xs font-semibold">OAuth</span>'
+                    : '<span class="px-2 py-1 bg-gray-50 text-gray-600 rounded-full text-xs font-semibold">API Key</span>';
+                const authStatus = isOAuth
+                    ? 'OAuth authenticated'
+                    : 'API key registered';
+
                 providerCard.innerHTML = `
                 <div class="flex items-start justify-between">
                     <div class="flex-1">
@@ -1888,10 +2059,11 @@
                             <span class="px-3 py-1 ${provider.enabled ? "bg-blue-50 text-blue-600" : "bg-gray-100 text-gray-500"} rounded-full text-sm font-semibold">
                                 ${provider.enabled ? "Active" : "Inactive"}
                             </span>
+                            ${authBadge}
                         </div>
                         <p class="text-gray-600 mb-4">${escapeHtml(provider.provider_type)}</p>
                         <div class="text-sm text-gray-500">
-                            API key registered
+                            ${authStatus}
                         </div>
                     </div>
                     <div class="flex gap-2">
@@ -2805,6 +2977,7 @@
                     const formData = new FormData(e.target);
                     const providerName = formData.get("provider_name")?.trim();
                     const providerType = formData.get("provider_type")?.trim();
+                    const authType = formData.get("auth_type")?.trim() || "apikey";
                     const apiKey = formData.get("api_key")?.trim();
                     const baseUrl = formData.get("base_url")?.trim();
 
@@ -2819,18 +2992,34 @@
                         return;
                     }
 
-                    if (!apiKey) {
+                    // For API key auth, require API key
+                    if (authType === "apikey" && !apiKey) {
                         notifyError("Please enter an API key.");
+                        return;
+                    }
+
+                    // For OAuth, check if token was saved
+                    const oauthProviderId = sessionStorage.getItem('oauth_provider_id');
+                    if (authType === "oauth" && !oauthProviderId) {
+                        notifyError("Please complete OAuth authentication first.");
                         return;
                     }
 
                     const providerData = {
                         name: providerName,
                         provider_type: providerType,
-                        api_key: apiKey,
+                        auth_type: authType,
                         models: [], // Empty array - models are defined in model mappings
                         enabled: true,
                     };
+
+                    // Add auth-specific fields
+                    if (authType === "oauth") {
+                        providerData.oauth_provider = oauthProviderId;
+                        // For OAuth, api_key is optional (not used)
+                    } else {
+                        providerData.api_key = apiKey;
+                    }
 
                     if (baseUrl) {
                         providerData.base_url = baseUrl;
@@ -3257,6 +3446,231 @@
                     .getElementById("test-response-container")
                     .classList.add("hidden");
                 document.getElementById("test-response-text").textContent = "";
+            }
+
+            // OAuth Functions
+            function toggleAuthMethod() {
+                const authType = document.querySelector('input[name="auth_type"]:checked').value;
+                const apiKeySection = document.getElementById('api-key-section');
+                const oauthSection = document.getElementById('oauth-section');
+                const apiKeyInput = document.getElementById('api-key-input');
+
+                if (authType === 'oauth') {
+                    apiKeySection.classList.add('hidden');
+                    oauthSection.classList.remove('hidden');
+                    apiKeyInput.removeAttribute('required');
+
+                    // Reset OAuth UI to step 1
+                    document.getElementById('oauth-step-1').classList.remove('hidden');
+                    document.getElementById('oauth-step-2').classList.add('hidden');
+                    document.getElementById('oauth-step-3').classList.add('hidden');
+                    document.getElementById('oauth-code-input').value = '';
+                } else {
+                    apiKeySection.classList.remove('hidden');
+                    oauthSection.classList.add('hidden');
+                    apiKeyInput.setAttribute('required', 'required');
+                }
+            }
+
+            async function loadOAuthTokens() {
+                const loadingEl = document.getElementById('oauth-tokens-loading');
+                const listEl = document.getElementById('oauth-tokens-list');
+                const emptyEl = document.getElementById('oauth-tokens-empty');
+
+                try {
+                    const response = await fetch('/api/oauth/tokens');
+                    if (!response.ok) {
+                        throw new Error('Failed to load OAuth tokens');
+                    }
+
+                    const tokens = await response.json();
+
+                    loadingEl.classList.add('hidden');
+
+                    if (tokens.length === 0) {
+                        emptyEl.classList.remove('hidden');
+                        listEl.classList.add('hidden');
+                    } else {
+                        emptyEl.classList.add('hidden');
+                        listEl.classList.remove('hidden');
+
+                        // Render tokens
+                        listEl.innerHTML = tokens.map(token => {
+                            const expiresAt = new Date(token.expires_at);
+                            const now = new Date();
+                            const isExpired = expiresAt <= now;
+                            const needsRefresh = token.needs_refresh;
+
+                            return `
+                                <div class="border-2 ${isExpired ? 'border-red-200 bg-red-50' : needsRefresh ? 'border-yellow-200 bg-yellow-50' : 'border-green-200 bg-green-50'} rounded-xl p-4">
+                                    <div class="flex items-start justify-between">
+                                        <div class="flex-1">
+                                            <div class="flex items-center gap-2 mb-2">
+                                                <h3 class="font-bold">${escapeHtml(token.provider_id)}</h3>
+                                                ${isExpired ? '<span class="px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs font-semibold">Expired</span>' : needsRefresh ? '<span class="px-2 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-semibold">Needs Refresh</span>' : '<span class="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-semibold">Active</span>'}
+                                            </div>
+                                            <div class="text-sm text-gray-600">
+                                                Expires: ${expiresAt.toLocaleString()}
+                                            </div>
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <button
+                                                class="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-sm font-semibold hover:bg-blue-200 transition-all"
+                                                onclick="refreshOAuthToken('${escapeHtml(token.provider_id)}')"
+                                            >
+                                                Refresh
+                                            </button>
+                                            <button
+                                                class="px-3 py-1 bg-red-100 text-red-700 rounded-lg text-sm font-semibold hover:bg-red-200 transition-all"
+                                                onclick="deleteOAuthToken('${escapeHtml(token.provider_id)}')"
+                                            >
+                                                Delete
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('');
+                    }
+                } catch (error) {
+                    console.error('Failed to load OAuth tokens:', error);
+                    loadingEl.innerHTML = '<div class="text-red-600">Failed to load OAuth tokens</div>';
+                }
+            }
+
+            async function refreshOAuthToken(providerId) {
+                try {
+                    const response = await fetch('/api/oauth/tokens/refresh', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ provider_id: providerId })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to refresh token');
+                    }
+
+                    notifySuccess(`Token refreshed for ${providerId}`);
+                    await loadOAuthTokens(); // Reload tokens list
+                } catch (error) {
+                    console.error('Failed to refresh token:', error);
+                    notifyError(`Failed to refresh token: ${error.message}`);
+                }
+            }
+
+            async function deleteOAuthToken(providerId) {
+                if (!confirm(`Are you sure you want to delete the OAuth token for "${providerId}"?`)) {
+                    return;
+                }
+
+                try {
+                    const response = await fetch('/api/oauth/tokens/delete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ provider_id: providerId })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to delete token');
+                    }
+
+                    notifySuccess(`OAuth token deleted for ${providerId}`);
+                    await loadOAuthTokens(); // Reload tokens list
+                } catch (error) {
+                    console.error('Failed to delete token:', error);
+                    notifyError(`Failed to delete token: ${error.message}`);
+                }
+            }
+
+            async function startOAuthFlow() {
+                try {
+                    // Step 1: Get authorization URL
+                    const response = await fetch('/api/oauth/authorize', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ oauth_type: 'max' })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to get authorization URL');
+                    }
+
+                    const data = await response.json();
+                    const { url, verifier } = data;
+
+                    // Store verifier for later use
+                    sessionStorage.setItem('oauth_verifier', verifier);
+
+                    // Step 2: Open authorization URL in new window
+                    window.open(url, 'OAuth Authorization', 'width=600,height=800');
+
+                    // Step 3: Show code input UI
+                    document.getElementById('oauth-step-1').classList.add('hidden');
+                    document.getElementById('oauth-step-2').classList.remove('hidden');
+
+                    notifySuccess('Authorization window opened. Please complete authentication and paste the code.');
+
+                } catch (error) {
+                    console.error('OAuth flow error:', error);
+                    notifyError(`Failed to start OAuth: ${error.message}`);
+                }
+            }
+
+            async function completeOAuthFlow() {
+                try {
+                    const code = document.getElementById('oauth-code-input').value.trim();
+
+                    if (!code) {
+                        notifyError('Please paste the authorization code');
+                        return;
+                    }
+
+                    const verifier = sessionStorage.getItem('oauth_verifier');
+                    if (!verifier) {
+                        throw new Error('OAuth verifier not found. Please start the flow again.');
+                    }
+
+                    // Exchange code for tokens
+                    const providerName = document.querySelector('input[name="provider_name"]').value || 'claude-max';
+                    const providerId = `${providerName}-oauth`;
+
+                    const exchangeResponse = await fetch('/api/oauth/exchange', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            code: code,
+                            verifier: verifier,
+                            provider_id: providerId
+                        })
+                    });
+
+                    if (!exchangeResponse.ok) {
+                        const error = await exchangeResponse.text();
+                        throw new Error(`Failed to exchange code: ${error}`);
+                    }
+
+                    const tokenData = await exchangeResponse.json();
+
+                    // Show success
+                    document.getElementById('oauth-step-2').classList.add('hidden');
+                    document.getElementById('oauth-step-3').classList.remove('hidden');
+                    sessionStorage.setItem('oauth_provider_id', providerId);
+
+                    notifySuccess(`OAuth authentication successful! Token saved for ${providerId}`);
+
+                } catch (error) {
+                    console.error('OAuth completion error:', error);
+                    notifyError(`Authentication failed: ${error.message}`);
+                }
+            }
+
+            function cancelOAuthFlow() {
+                // Reset to initial state
+                document.getElementById('oauth-step-2').classList.add('hidden');
+                document.getElementById('oauth-step-1').classList.remove('hidden');
+                document.getElementById('oauth-code-input').value = '';
+                sessionStorage.removeItem('oauth_verifier');
+                notifySuccess('OAuth flow canceled');
             }
 
             // Initialize

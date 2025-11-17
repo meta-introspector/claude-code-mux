@@ -58,6 +58,14 @@ async-trait = "0.1"        # Async trait support
 dirs = "5"                 # User directories
 regex = "1"                # Regular expressions
 
+# OAuth & Auth
+oauth2 = "4"               # OAuth 2.0 client
+base64 = "0.22"            # Base64 encoding
+sha2 = "0.10"              # SHA-256 for PKCE
+rand = "0.8"               # Random generation for PKCE
+chrono = { version = "0.4", features = ["serde"] }  # Timestamps
+url = "2"                  # URL parsing
+
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", features = ["signal"] }  # Unix signals
 

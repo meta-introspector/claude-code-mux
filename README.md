@@ -85,6 +85,7 @@ Web UI with auto-save - no JSON editing, no CLI commands, no restarts:
 
 ### 🎯 Core Features
 - ✨ **Modern Admin UI** - Beautiful web interface with auto-save and URL-based navigation
+- 🔐 **OAuth 2.0 Support** - FREE access for Claude Pro/Max subscribers with automatic token refresh
 - 🧠 **Intelligent Routing** - Auto-route by task type (websearch, reasoning, background, default)
 - 🔄 **Provider Failover** - Automatic fallback to backup providers with priority-based routing
 - 🌊 **Streaming Support** - Full Server-Sent Events (SSE) streaming for real-time responses
@@ -129,7 +130,8 @@ Test your configuration with real API calls.
 ## Supported Providers
 
 ### Anthropic-Compatible (Native Format)
-- **Anthropic** - Official Claude API provider
+- **Anthropic** - Official Claude API provider (supports both API Key and OAuth)
+- **Anthropic (OAuth)** - 🆓 **FREE for Claude Pro/Max subscribers** via OAuth 2.0
 - **ZenMux** - Unified API gateway (Sunnyvale, CA)
 - **z.ai** - China-based, GLM models
 - **Minimax** - China-based, MiniMax-M2 model
@@ -273,11 +275,24 @@ That's it! Your setup is complete.
 
 Navigate to **Providers** tab → Click **"Add Provider"**
 
+#### Example: Add Anthropic with OAuth (🆓 FREE for Claude Pro/Max)
+1. Select provider type: **Anthropic**
+2. Enter provider name: `claude-max`
+3. Select authentication: **OAuth (Claude Pro/Max)**
+4. Click **"🔐 Start OAuth Login"**
+5. Authorize in the popup window
+6. Copy and paste the authorization code
+7. Click **"Complete Authentication"**
+8. Click **"Add Provider"**
+
+> **💡 Pro Tip**: Claude Pro/Max subscribers get **unlimited API access for FREE** via OAuth!
+
 #### Example: Add ZenMux Provider
 1. Select provider type: **ZenMux**
 2. Enter provider name: `zenmux`
-3. Enter API key: `your-zenmux-api-key`
-4. Click **"Add Provider"**
+3. Select authentication: **API Key**
+4. Enter API key: `your-zenmux-api-key`
+5. Click **"Add Provider"**
 
 #### Example: Add OpenAI Provider
 1. Select provider type: **OpenAI**
@@ -292,7 +307,7 @@ Navigate to **Providers** tab → Click **"Add Provider"**
 4. Click **"Add Provider"**
 
 **Supported Providers**:
-- Anthropic-compatible: Anthropic, ZenMux, z.ai, Minimax, Kimi
+- Anthropic-compatible: Anthropic (API Key or OAuth), ZenMux, z.ai, Minimax, Kimi
 - OpenAI-compatible: OpenAI, OpenRouter, Groq, Together, Fireworks, Deepinfra, Cerebras, Nebius, NovitaAI, Baseten
 
 ### Step 2: Add Model Mappings
@@ -526,6 +541,68 @@ Result: glm-4.6 (original model name, routed through model mappings)
 - WebSearch: `glm-4.6`
 
 ## Advanced Features
+
+### OAuth Authentication (FREE for Claude Pro/Max)
+
+Claude Pro/Max subscribers can use the official Claude API **completely free** via OAuth 2.0 authentication.
+
+#### Setting Up OAuth
+
+**Via Web UI** (Recommended):
+1. Navigate to **Providers** tab → **"Add Provider"**
+2. Select provider type: **Anthropic**
+3. Enter provider name (e.g., `claude-max`)
+4. Select authentication: **OAuth (Claude Pro/Max)**
+5. Click **"🔐 Start OAuth Login"**
+6. Complete authorization in popup window
+7. Copy and paste the authorization code
+8. Click **"Complete Authentication"**
+
+**Via CLI Tool**:
+```bash
+# Run OAuth login tool
+cargo run --example oauth_login
+
+# Or if installed
+./examples/oauth_login
+```
+
+The tool will:
+1. Generate an authorization URL
+2. Open your browser for authorization
+3. Prompt for the authorization code
+4. Exchange code for access/refresh tokens
+5. Save tokens to `~/.claude-code-mux/oauth_tokens.json`
+
+#### Managing OAuth Tokens
+
+Navigate to **Settings** tab → **OAuth Tokens** section to:
+- **View token status** (Active/Needs Refresh/Expired)
+- **Refresh tokens** manually (auto-refresh happens 5 minutes before expiry)
+- **Delete tokens** when no longer needed
+
+**Token Features**:
+- 🔐 Secure PKCE-based OAuth 2.0 flow
+- 🔄 Automatic token refresh (5 min before expiry)
+- 💾 Persistent storage with file permissions (0600)
+- 🎨 Visual status indicators (green/yellow/red)
+
+**Security Notes**:
+- Tokens are stored with `0600` permissions (owner read/write only)
+- Never commit `oauth_tokens.json` to version control
+- Tokens auto-refresh before expiration
+- PKCE protects against authorization code interception
+
+#### OAuth API Endpoints
+
+For advanced integrations:
+- `POST /api/oauth/authorize` - Get authorization URL
+- `POST /api/oauth/exchange` - Exchange code for tokens
+- `GET /api/oauth/tokens` - List all tokens
+- `POST /api/oauth/tokens/refresh` - Refresh a token
+- `POST /api/oauth/tokens/delete` - Delete a token
+
+See `docs/OAUTH_TESTING.md` for detailed API documentation.
 
 ### Auto-mapping with Regex
 

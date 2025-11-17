@@ -17,4 +17,7 @@ pub enum ProviderError {
 
     #[error("Configuration error: {0}")]
     ConfigError(String),
+
+    #[error("Authentication error: {0}")]
+    AuthError(String),
 }

@@ -54,12 +54,41 @@ pub trait AnthropicProvider: Send + Sync {
     fn supports_model(&self, model: &str) -> bool;
 }
 
+/// Authentication type for providers
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthType {
+    /// API key authentication
+    ApiKey,
+    /// OAuth 2.0 authentication
+    OAuth,
+}
+
+impl Default for AuthType {
+    fn default() -> Self {
+        AuthType::ApiKey
+    }
+}
+
 /// Provider configuration from TOML
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfig {
     pub name: String,
     pub provider_type: String,
-    pub api_key: String,
+
+    /// Authentication type (default: api_key)
+    #[serde(default)]
+    pub auth_type: AuthType,
+
+    /// API key (required for auth_type = "apikey")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+
+    /// OAuth provider ID (required for auth_type = "oauth")
+    /// References a token stored in TokenStore
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth_provider: Option<String>,
+
     pub base_url: Option<String>,
     pub models: Vec<String>,
     pub enabled: Option<bool>,
@@ -68,6 +97,14 @@ pub struct ProviderConfig {
 impl ProviderConfig {
     pub fn is_enabled(&self) -> bool {
         self.enabled.unwrap_or(true)
+    }
+
+    /// Get the API key or OAuth provider ID
+    pub fn get_auth_credential(&self) -> Option<String> {
+        match self.auth_type {
+            AuthType::ApiKey => self.api_key.clone(),
+            AuthType::OAuth => self.oauth_provider.clone(),
+        }
     }
 }
 

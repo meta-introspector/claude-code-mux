@@ -1,4 +1,5 @@
 use super::{AnthropicProvider, ProviderConfig, OpenAIProvider, AnthropicCompatibleProvider, error::ProviderError};
+use crate::auth::TokenStore;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -20,7 +21,7 @@ impl ProviderRegistry {
     }
 
     /// Load providers from configuration
-    pub fn from_configs(configs: &[ProviderConfig]) -> Result<Self, ProviderError> {
+    pub fn from_configs(configs: &[ProviderConfig], token_store: Option<TokenStore>) -> Result<Self, ProviderError> {
         let mut registry = Self::new();
 
         for config in configs {
@@ -29,11 +30,27 @@ impl ProviderRegistry {
                 continue;
             }
 
+            // Get API key - required for API key auth, skipped for OAuth
+            let api_key = match &config.auth_type {
+                super::AuthType::ApiKey => {
+                    config.api_key.clone().ok_or_else(|| {
+                        ProviderError::ConfigError(
+                            format!("Provider '{}' requires api_key for ApiKey auth", config.name)
+                        )
+                    })?
+                }
+                super::AuthType::OAuth => {
+                    // OAuth providers will handle authentication differently
+                    // For now, use a placeholder - will be replaced with token
+                    config.oauth_provider.clone().unwrap_or_else(|| config.name.clone())
+                }
+            };
+
             // Create provider instance based on type
             let provider: Box<dyn AnthropicProvider> = match config.provider_type.as_str() {
                 // OpenAI
                 "openai" => Box::new(OpenAIProvider::new(
-                    config.api_key.clone(),
+                    api_key,
                     config.base_url.clone(),
                     config.models.clone(),
                 )),
@@ -41,67 +58,72 @@ impl ProviderRegistry {
                 // Anthropic-compatible providers
                 "anthropic" => Box::new(AnthropicCompatibleProvider::new(
                     config.name.clone(),
-                    config.api_key.clone(),
+                    api_key,
                     config.base_url.clone().unwrap_or_else(|| "https://api.anthropic.com".to_string()),
                     config.models.clone(),
-                    None,
+                    config.oauth_provider.clone(),
+                    token_store.clone(),
                 )),
                 "z.ai" => Box::new(AnthropicCompatibleProvider::zai(
-                    config.api_key.clone(),
+                    api_key,
                     config.models.clone(),
+                    token_store.clone(),
                 )),
                 "minimax" => Box::new(AnthropicCompatibleProvider::minimax(
-                    config.api_key.clone(),
+                    api_key,
                     config.models.clone(),
+                    token_store.clone(),
                 )),
                 "zenmux" => Box::new(AnthropicCompatibleProvider::zenmux(
-                    config.api_key.clone(),
+                    api_key,
                     config.models.clone(),
+                    token_store.clone(),
                 )),
                 "kimi-coding" => Box::new(AnthropicCompatibleProvider::kimi_coding(
-                    config.api_key.clone(),
+                    api_key,
                     config.models.clone(),
+                    token_store.clone(),
                 )),
 
                 // OpenAI-compatible providers
                 "openrouter" => Box::new(OpenAIProvider::openrouter(
-                    config.api_key.clone(),
+                    api_key,
                     config.models.clone(),
                 )),
                 "deepinfra" => Box::new(OpenAIProvider::deepinfra(
-                    config.api_key.clone(),
+                    api_key,
                     config.models.clone(),
                 )),
                 "novita" => Box::new(OpenAIProvider::novita(
-                    config.api_key.clone(),
+                    api_key,
                     config.models.clone(),
                 )),
                 "baseten" => Box::new(OpenAIProvider::baseten(
-                    config.api_key.clone(),
+                    api_key,
                     config.models.clone(),
                 )),
                 "together" => Box::new(OpenAIProvider::together(
-                    config.api_key.clone(),
+                    api_key,
                     config.models.clone(),
                 )),
                 "fireworks" => Box::new(OpenAIProvider::fireworks(
-                    config.api_key.clone(),
+                    api_key,
                     config.models.clone(),
                 )),
                 "groq" => Box::new(OpenAIProvider::groq(
-                    config.api_key.clone(),
+                    api_key,
                     config.models.clone(),
                 )),
                 "nebius" => Box::new(OpenAIProvider::nebius(
-                    config.api_key.clone(),
+                    api_key,
                     config.models.clone(),
                 )),
                 "cerebras" => Box::new(OpenAIProvider::cerebras(
-                    config.api_key.clone(),
+                    api_key,
                     config.models.clone(),
                 )),
                 "moonshot" => Box::new(OpenAIProvider::moonshot(
-                    config.api_key.clone(),
+                    api_key,
                     config.models.clone(),
                 )),
 

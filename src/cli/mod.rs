@@ -148,12 +148,15 @@ impl AppConfig {
                 continue;
             }
 
-            if provider.api_key.starts_with('$') {
-                let env_var = &provider.api_key[1..];
-                if let Ok(value) = std::env::var(env_var) {
-                    provider.api_key = value;
-                } else {
-                    anyhow::bail!("Environment variable {} not found for provider {}", env_var, provider.name);
+            // Only resolve env vars for API key auth
+            if let Some(ref api_key) = provider.api_key {
+                if api_key.starts_with('$') {
+                    let env_var = &api_key[1..];
+                    if let Ok(value) = std::env::var(env_var) {
+                        provider.api_key = Some(value);
+                    } else {
+                        anyhow::bail!("Environment variable {} not found for provider {}", env_var, provider.name);
+                    }
                 }
             }
         }
