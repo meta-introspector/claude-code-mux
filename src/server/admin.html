@@ -957,7 +957,6 @@
                                                             name="vertex_project_id"
                                                             class="input-field font-mono"
                                                             placeholder="my-gcp-project"
-                                                            required
                                                         />
                                                         <div
                                                             class="helper-text"
@@ -975,7 +974,6 @@
                                                             id="vertex-location"
                                                             name="vertex_location"
                                                             class="input-field"
-                                                            required
                                                         >
                                                             <option
                                                                 value="us-central1"
@@ -3837,15 +3835,27 @@
                     document.getElementById("auth-card-title");
 
                 // Show/hide Vertex AI config based on provider type
+                const vertexProjectIdField = document.getElementById("vertex-project-id");
+                const vertexLocationField = document.getElementById("vertex-location");
+
                 if (providerType === "vertex-ai") {
                     vertexAiConfig.classList.remove("hidden");
                     authTypeSelector.classList.add("hidden");
                     authCardTitle.textContent = "Vertex AI Configuration";
+
+                    // Add required attributes for Vertex AI
+                    if (vertexProjectIdField) vertexProjectIdField.setAttribute("required", "required");
+                    if (vertexLocationField) vertexLocationField.setAttribute("required", "required");
+
                     return; // Skip OAuth label updates
                 } else {
                     vertexAiConfig.classList.add("hidden");
                     authTypeSelector.classList.remove("hidden");
                     authCardTitle.textContent = "Choose authentication method";
+
+                    // Remove required attributes when not Vertex AI
+                    if (vertexProjectIdField) vertexProjectIdField.removeAttribute("required");
+                    if (vertexLocationField) vertexLocationField.removeAttribute("required");
                 }
 
                 if (providerType === "openai") {
