@@ -1056,6 +1056,13 @@ impl AnthropicProvider for OpenAIProvider {
         // Get authentication token (API key or OAuth)
         let auth_value = self.get_auth_header().await?;
 
+        // Determine base URL: OAuth uses ChatGPT backend, API key uses configured base_url
+        let base_url = if self.is_oauth() {
+            "https://chatgpt.com/backend-api"
+        } else {
+            &self.base_url
+        };
+
         // Check if this is a Codex model
         let is_codex = Self::is_codex_model(&request.model);
 
@@ -1065,13 +1072,13 @@ impl AnthropicProvider for OpenAIProvider {
             let responses_request = self.transform_to_responses_request(&request)?;
             let body = serde_json::to_value(&responses_request)
                 .map_err(|e| ProviderError::SerializationError(e))?;
-            (format!("{}/responses", self.base_url), body)
+            (format!("{}/responses", base_url), body)
         } else {
             // Use standard /v1/chat/completions endpoint
             let openai_request = self.transform_request(&request)?;
             let body = serde_json::to_value(&openai_request)
                 .map_err(|e| ProviderError::SerializationError(e))?;
-            (format!("{}/chat/completions", self.base_url), body)
+            (format!("{}/chat/completions", base_url), body)
         };
 
         // Send streaming request
