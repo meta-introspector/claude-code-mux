@@ -169,7 +169,22 @@ sudo mv ccm /usr/local/bin/
 ccm --version
 ```
 
-### Option 2: Build from Source
+### Option 2: Install via Cargo
+
+If you have Rust installed, you can install directly from crates.io:
+
+```bash
+cargo install claude-code-mux
+```
+
+This will download, compile, and install the `ccm` binary to your cargo bin directory (usually `~/.cargo/bin/`).
+
+#### Verify Installation
+```bash
+ccm --version
+```
+
+### Option 3: Build from Source
 
 #### Prerequisites
 - Rust 1.70+ (install from [rustup.rs](https://rustup.rs/))
