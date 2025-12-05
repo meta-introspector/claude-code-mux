@@ -1,0 +1,504 @@
+use super::state::{AppState, LogState};
+use super::error::AppError;
+use super::config_update::ConfigUpdate;
+use super::utils::{remove_null_values, create_and_execute_restart_script};
+use crate::cli::AppConfig;
+use crate::models::{AnthropicRequest, CountTokensRequest};
+use crate::router::Router as AppRouter;
+use crate::providers::ProviderRegistry;
+use crate::auth::TokenStore;
+use crate::server::{oauth_handlers, openai_compat};
+use axum::{
+    body::Body,
+    extract::{Extension, Path, Query, Form, State},
+    http::{HeaderMap, Request, StatusCode},
+    middleware::{from_fn, Next},
+    response::{Html, IntoResponse, Redirect, Response, sse::{Event, Sse}},
+    routing::{get, post},
+    Json, Router as AxumRouter,
+};
+// use axum_extra::headers::{UserAgent, TypedHeader}; // Commented out
+use std::sync::Arc;
+use tracing::{error, info, debug, warn};
+use futures::stream::StreamExt;
+use anyhow::Context;
+use toml;
+use serde_json::Value; // Added this import
+
+/// Serve Admin UI
+pub async fn serve_admin() -> impl IntoResponse {
+    Html(include_str!("admin.html")) // Adjusted path
+}
+
+/// Health check endpoint
+pub async fn health_check() -> impl IntoResponse {
+    Json(serde_json::json!({
+        "status": "ok",
+        "service": "claude-code-mux"
+    }))
+}
+
+/// REMOVED: This endpoint was for LiteLLM integration which has been removed.
+/// Models are now managed through the provider registry and config.
+pub async fn get_models(State(_state): State<Arc<AppState>>) -> Result<Json<serde_json::Value>, AppError> {
+    Err(AppError::ParseError("This endpoint has been removed. Use /api/models-config instead.".to_string()))
+}
+
+/// Get current routing configuration
+pub async fn get_config(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let config = state.config.read().await; // Acquire read lock
+    Json(get_base_config_json(&config))
+}
+
+pub async fn update_config(
+    State(state): State<Arc<AppState>>,
+    Form(update): Form<ConfigUpdate>,
+) -> Result<Html<String>, AppError> {
+    // Read current config
+    let config_path = &state.config_path;
+    let config_str = std::fs::read_to_string(config_path)
+        .map_err(|e| AppError::ParseError(format!("Failed to read config: {}", e)))?;
+
+    let mut config: toml::Value = toml::from_str(&config_str)
+        .map_err(|e| AppError::ParseError(format!("Failed to parse config: {}", e)))?;
+
+    // Update router section
+    if let Some(router) = config.get_mut("router").and_then(|v| v.as_table_mut()) {
+        router.insert("default".to_string(), toml::Value::String(update.default_model));
+
+        if let Some(bg) = update.background_model {
+            router.insert("background".to_string(), toml::Value::String(bg));
+        }
+
+        if let Some(think) = update.think_model {
+            router.insert("think".to_string(), toml::Value::String(think));
+        }
+
+        if let Some(ws) = update.websearch_model {
+            router.insert("websearch".to_string(), toml::Value::String(ws));
+        }
+    }
+
+    // Write back to file
+    let new_config_str = toml::to_string_pretty(&config)
+        .map_err(|e| AppError::ParseError(format!("Failed to serialize config: {}", e)))?;
+
+    std::fs::write(config_path, new_config_str)
+        .map_err(|e| AppError::ParseError(format!("Failed to write config: {}", e)))?;
+
+    info!("✅ Configuration updated successfully");
+
+    Ok(Html("<div class='px-4 py-3 rounded-xl bg-primary/20 border border-primary/50 text-foreground text-sm'>✅ Configuration saved successfully! Please restart the server to apply changes.</div>".to_string()))
+}
+
+/// Get providers configuration
+pub async fn get_providers(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let config = state.config.read().await; // Acquire read lock
+    Json(config.providers.clone())
+}
+
+/// Get models configuration
+pub async fn get_models_config(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let config = state.config.read().await; // Acquire read lock
+    Json(config.models.clone())
+}
+
+/// Get full configuration as JSON (for admin UI)
+pub async fn get_config_json(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let config = state.config.read().await; // Acquire read lock
+    let mut json_config = get_base_config_json(&config);
+
+    if let Some(obj) = json_config.as_object_mut() {
+        obj.insert("providers".to_string(), serde_json::to_value(&config.providers).unwrap());
+        obj.insert("models".to_string(), serde_json::to_value(&config.models).unwrap());
+    }
+
+    Json(json_config)
+}
+
+/// Creates the base configuration JSON value.
+fn get_base_config_json(config: &AppConfig) -> serde_json::Value {
+    serde_json::json!({
+        "server": {
+            "host": config.server.host.clone(),
+            "port": config.server.port,
+        },
+        "router": {
+            "default": config.router.default,
+            "background": config.router.background,
+            "think": config.router.think,
+            "websearch": config.router.websearch,
+        }
+    })
+}
+
+/// Update configuration via JSON (for admin UI)
+pub async fn update_config_json(
+    State(state): State<Arc<AppState>>,
+    Json(mut new_config): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    // Remove null values (TOML doesn't support null)
+    remove_null_values(&mut new_config);
+
+    // Write back to config file
+    let config_path = &state.config_path;
+
+    // Read current config
+    let config_str = std::fs::read_to_string(config_path)
+        .map_err(|e| AppError::ParseError(format!("Failed to read config: {}", e)))?;
+
+    let mut config: toml::Value = toml::from_str(&config_str)
+        .map_err(|e| AppError::ParseError(format!("Failed to parse config: {}", e)))?;
+
+    // Update providers section
+    if let Some(providers) = new_config.get("providers") {
+        // Convert from serde_json::Value to toml::Value
+        let providers_toml: toml::Value = serde_json::from_str(&providers.to_string())
+            .map_err(|e| AppError::ParseError(format!("Failed to convert providers: {}", e)))?;
+
+        if let Some(table) = config.as_table_mut() {
+            table.insert("providers".to_string(), providers_toml);
+        }
+    }
+
+    // Update models section
+    if let Some(models) = new_config.get("models") {
+        // Convert from serde_json::Value to toml::Value
+        let models_toml: toml::Value = serde_json::from_str(&models.to_string())
+            .map_err(|e| AppError::ParseError(format!("Failed to convert models: {}", e)))?;
+
+        if let Some(table) = config.as_table_mut() {
+            table.insert("models".to_string(), models_toml);
+        }
+    }
+
+    // Update router section if provided
+    if let Some(router) = new_config.get("router") {
+        if let Some(router_table) = config.get_mut("router").and_then(|v| v.as_table_mut()) {
+            if let Some(default) = router.get("default") {
+                if let Some(s) = default.as_str() {
+                    router_table.insert("default".to_string(), toml::Value::String(s.to_string()));
+                }
+            }
+            if let Some(think) = router.get("think") {
+                if let Some(s) = think.as_str() {
+                    router_table.insert("think".to_string(), toml::Value::String(s.to_string()));
+                }
+            }
+            if let Some(ws) = router.get("websearch") {
+                if let Some(s) = ws.as_str() {
+                    router_table.insert("websearch".to_string(), toml::Value::String(s.to_string()));
+                }
+            }
+            if let Some(bg_value) = router.get("background") { // Corrected variable name
+                if let Some(s) = bg_value.as_str() {
+                    router_table.insert("background".to_string(), toml::Value::String(s.to_string()));
+                }
+            }
+            if let Some(auto_map) = router.get("auto_map_regex") {
+                if let Some(s) = auto_map.as_str() {
+                    router_table.insert("auto_map_regex".to_string(), toml::Value::String(s.to_string()));
+                }
+                
+            }
+            if let Some(bg_regex) = router.get("background_regex") {
+                if let Some(s) = bg_regex.as_str() {
+                    router_table.insert("background_regex".to_string(), toml::Value::String(s.to_string()));
+                }
+            }
+        }
+    }
+
+    // Write back to file
+    let new_config_str = toml::to_string_pretty(&config)
+        .map_err(|e| AppError::ParseError(format!("Failed to serialize config: {}", e)))?;
+
+    std::fs::write(config_path, new_config_str)
+        .map_err(|e| AppError::ParseError(format!("Failed to write config: {}", e)))?;
+
+    info!("✅ Configuration updated successfully");
+
+    Ok(Json(serde_json::json!({ // Changed to Json
+        "status": "success",
+        "message": "Configuration saved successfully"
+    })))
+}
+
+/// Handle /v1/chat/completions requests (OpenAI-compatible endpoint)
+pub async fn handle_openai_chat_completions(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(openai_request): Json<openai_compat::OpenAIRequest>,
+) -> Result<Response, AppError> {
+    let model = openai_request.model.clone();
+    info!("Received OpenAI-compatible request for model: {}", model);
+
+    // 1. Transform OpenAI request to Anthropic format
+    let mut anthropic_request = openai_compat::transform_openai_to_anthropic(openai_request)
+        .map_err(|e| AppError::ParseError(format!("Failed to transform OpenAI request: {}", e)))?;
+
+    info!("Transformed OpenAI request to Anthropic format");
+
+    // 2. Route the request (may modify system prompt to remove CCM-SUBAGENT-MODEL tag)
+    let decision = state
+        .router
+        .route(&mut anthropic_request)
+        .map_err(|e| AppError::RoutingError(e.to_string()))?;
+
+    info!(
+        "🎯 Routed to: {} ({})",
+        decision.model_name,
+        decision.route_type
+    );
+
+    // 3. Try model mappings with fallback (1:N mapping)
+    if let Some(model_config) = state.config.read().await.models.iter().find(|m| m.name == decision.model_name) { // Acquire read lock
+        info!("📋 Found {} provider mappings for model: {}", model_config.mappings.len(), decision.model_name);
+
+        // Check for X-Provider header to override priority
+        let forced_provider = headers
+            .get("x-provider")
+            .and_then(|v| v.to_str().ok())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+
+        if let Some(ref provider_name) = forced_provider {
+            info!("🎯 Using forced provider from X-Provider header: {}", provider_name);
+        }
+
+        // Sort mappings by priority (or filter by forced provider)
+        let mut sorted_mappings = model_config.mappings.clone();
+
+        if let Some(ref provider_name) = forced_provider {
+            // Filter to only the specified provider
+            sorted_mappings.retain(|m| m.provider == *provider_name);
+            if sorted_mappings.is_empty() {
+                return Err(AppError::RoutingError(format!(
+                    "Provider '{}' not found in mappings for model '{}'",
+                    provider_name,
+                    decision.model_name
+                )));
+            }
+        } else {
+            // Use priority ordering
+            sorted_mappings.sort_by_key(|m| m.priority);
+        }
+
+        // Try each mapping in priority order (or just the forced one)
+        for (idx, mapping) in sorted_mappings.iter().enumerate() {
+            info!(
+                "🔄 Trying mapping {}/{}: provider={}, actual_model={}",
+                idx + 1,
+                sorted_mappings.len(),
+                mapping.provider,
+                mapping.actual_model
+            );
+
+            // Try to get provider from registry
+            if let Some(provider) = state.provider_registry.get_provider(&mapping.provider) {
+                // Trust the model mapping configuration - no need to validate
+
+                // Update model to actual model name
+                anthropic_request.model = mapping.actual_model.clone();
+
+                // Check if streaming is requested
+                let is_streaming = anthropic_request.stream == Some(true);
+
+                if is_streaming {
+                    // Streaming request
+                    info!("🌊 Streaming request to provider: {}", mapping.provider);
+
+                    match provider.send_message_stream(anthropic_request).await {
+                        Ok(stream) => {
+                            info!("✅ Streaming request started with provider: {}", mapping.provider);
+
+                            // Convert byte stream to SSE response
+                            // The provider returns raw bytes (SSE format), we pass them through
+                            let sse_stream = stream.map(|result| {
+                                result.map(|bytes| {
+                                    // Convert bytes to string for SSE event
+                                    let data = String::from_utf8_lossy(&bytes).to_string();
+                                    Event::default().data(data)
+                                }).map_err(|e| {
+                                    error!("Stream error: {}", e);
+                                    std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+                                })
+                            });
+
+                            return Ok(Sse::new(sse_stream).into_response());
+                        }
+                        Err(e) => {
+                            info!("⚠️ Provider {} streaming failed: {}, trying next fallback", mapping.provider, e);
+                            continue;
+                        }
+                    }
+                } else {
+                    // Non-streaming request (original behavior)
+                    match provider.send_message(anthropic_request).await {
+                        Ok(mut response) => {
+                            // Restore original model name in response
+                            response.model = original_model;
+                            info!("✅ Request succeeded with provider: {}, response model: {}", mapping.provider, response.model);
+                            return Ok(Json(response).into_response());
+                        }
+                        Err(e) => {
+                            info!("⚠️ Provider {} failed: {}, trying next fallback", mapping.provider, e);
+                            continue;
+                        }
+                    }
+                }
+            } else {
+                info!("⚠️ Provider {} not found in registry, trying next fallback", mapping.provider);
+                continue;
+            }
+        }
+
+        error!("❌ All provider mappings failed for model: {}", decision.model_name);
+        return Err(AppError::ProviderError(format!(
+            "All {} provider mappings failed for model: {}",
+            sorted_mappings.len(),
+            decision.model_name
+        )));
+    } else {
+        // No model mapping found, try direct provider registry lookup (backward compatibility)
+        if let Ok(provider) = state.provider_registry.get_provider_for_model(&decision.model_name) {
+            info!("📦 Using provider from registry (direct lookup): {}", decision.model_name);
+
+            // Update model to routed model
+            anthropic_request.model = decision.model_name.clone();
+
+            // Call provider
+            let anthropic_response = provider.send_message(anthropic_request) 
+                .await
+                .map_err(|e| AppError::ProviderError(e.to_string()))?;
+
+            // Transform to OpenAI format
+            let openai_response = openai_compat::transform_anthropic_to_openai(
+                anthropic_response,
+                model,
+            );
+
+            return Ok(Json(openai_response).into_response());
+        }
+
+        error!("❌ No model mapping or provider found for model: {}", decision.model_name);
+        return Err(AppError::ProviderError(format!(
+            "No model mapping or provider found for model: {}",
+            decision.model_name
+        )));
+    }
+}
+
+/// Handle /v1/messages/count_tokens requests
+pub async fn handle_count_tokens(
+    State(state): State<Arc<AppState>>,
+    Json(request_json): Json<serde_json::Value>,
+) -> Result<Response, AppError> {
+    let model = request_json.get("model").and_then(|m| m.as_str()).unwrap_or("unknown");
+    info!("Received count_tokens request for model: {}", model);
+
+    // 1. Parse as CountTokensRequest first
+    use crate::models::CountTokensRequest;
+    let count_request: CountTokensRequest = serde_json::from_value(request_json.clone())
+        .map_err(|e| AppError::ParseError(format!("Invalid count_tokens request format: {}", e)))?;
+
+    // 2. Create a minimal AnthropicRequest for routing
+    let mut routing_request = AnthropicRequest {
+        model: count_request.model.clone(),
+        messages: count_request.messages.clone(),
+        max_tokens: 1024, // Dummy value for routing
+        system: count_request.system.clone(),
+        tools: count_request.tools.clone(),
+        thinking: None,
+        temperature: None,
+        top_p: None,
+        top_k: None,
+        stop_sequences: None,
+        stream: None,
+        metadata: None,
+    };
+    let decision = state
+        .router
+        .route(&mut routing_request)
+        .map_err(|e| AppError::RoutingError(e.to_string()))?;
+
+    info!(
+        "🧮 Routed count_tokens: {} → {} ({})",
+        model,
+        decision.model_name,
+        decision.route_type
+    );
+
+    // 3. Try model mappings with fallback (1:N mapping)
+    if let Some(model_config) = state.config.read().await.models.iter().find(|m| m.name == decision.model_name) { // Acquire read lock
+        info!("📋 Found {} provider mappings for token counting: {}", model_config.mappings.len(), decision.model_name);
+
+        // Sort mappings by priority
+        let mut sorted_mappings = model_config.mappings.clone();
+        sorted_mappings.sort_by_key(|m| m.priority);
+
+        // Try each mapping in priority order
+        for (idx, mapping) in sorted_mappings.iter().enumerate() {
+            info!(
+                "🔄 Trying token count mapping {}/{}: provider={}, actual_model={}",
+                idx + 1,
+                sorted_mappings.len(),
+                mapping.provider,
+                mapping.actual_model
+            );
+
+            // Try to get provider from registry
+            if let Some(provider) = state.provider_registry.get_provider(&mapping.provider) {
+                // Trust the model mapping configuration - no need to validate
+
+                // Update model to actual model name
+                let mut count_request_for_provider = count_request.clone();
+                count_request_for_provider.model = mapping.actual_model.clone();
+
+                // Call provider's count_tokens
+                match provider.count_tokens(count_request_for_provider).await {
+                    Ok(response) => {
+                        info!("✅ Token count succeeded with provider: {}", mapping.provider);
+                        return Ok(Json(response).into_response());
+                    }
+                    Err(e) => {
+                        info!("⚠️ Provider {} failed: {}, trying next fallback", mapping.provider, e);
+                        continue;
+                    }
+                }
+            } else {
+                info!("⚠️ Provider {} not found in registry, trying next fallback", mapping.provider);
+                continue;
+            }
+        }
+
+        error!("❌ All provider mappings failed for token counting: {}", decision.model_name);
+        return Err(AppError::ProviderError(format!(
+            "No model mapping or provider found for token counting: {}",
+            decision.model_name
+        )));
+    } else {
+        // No model mapping found, try direct provider registry lookup (backward compatibility)
+        if let Ok(provider) = state.provider_registry.get_provider_for_model(&decision.model_name) {
+            info!("📦 Using provider from registry (direct lookup) for token counting: {}", decision.model_name);
+
+            // Update model to routed model
+            let mut count_request_for_provider = count_request.clone();
+            count_request_for_provider.model = decision.model_name.clone();
+
+            // Call provider's count_tokens
+            let response = provider.count_tokens(count_request_for_provider)
+                .await
+                .map_err(|e| AppError::ProviderError(e.to_string()))?;
+
+            info!("✅ Token count completed via provider");
+            return Ok(Json(response).into_response());
+        }
+
+        error!("❌ No model mapping or provider found for token counting: {}", decision.model_name);
+        return Err(AppError::ProviderError(format!(
+            "No model mapping or provider found for token counting: {}",
+            decision.model_name
+        )));
+    }
+}

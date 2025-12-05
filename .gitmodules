@@ -1,0 +1,3 @@
+[submodule "tracing-loki"]
+	path = tracing-loki
+	url = https://github.com/hrxi/tracing-loki

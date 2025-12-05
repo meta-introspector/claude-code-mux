@@ -1,13 +1,14 @@
 use clap::{Parser, Subcommand};
+use claude_code_mux::{
+    cli::AppConfig,
+    logging::{LogEntry, QueryableLogLayer},
+    pid,
+    server::{self, LogState},
+};
+use std::collections::VecDeque;
 use std::path::PathBuf;
-
-mod auth;
-mod cli;
-mod models;
-mod pid;
-mod providers;
-mod router;
-mod server;
+use std::sync::{Arc, RwLock};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 #[derive(Parser)]
 #[command(name = "ccm")]
@@ -44,8 +45,31 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize tracing
-    tracing_subscriber::fmt::init();
+    // --- Set up Queryable Logging ---
+    let log_buffer = Arc::new(RwLock::new(VecDeque::with_capacity(1000)));
+
+    // Ensure logs directory exists
+    let log_dir = "logs";
+    std::fs::create_dir_all(log_dir)?;
+    let log_file_path = format!("{}/archive.log", log_dir);
+
+    let queryable_layer = QueryableLogLayer::new(log_buffer.clone(), &log_file_path)?;
+
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer())
+        .with(queryable_layer)
+        .init();
+
+    let log_state = LogState {
+        log_buffer,
+        log_file_path,
+    };
+    // --- End Logging Setup ---
+
 
     let cli = Cli::parse();
 
@@ -97,7 +121,7 @@ async fn main() -> anyhow::Result<()> {
             println!("Press Ctrl+C to stop");
 
             // Cleanup PID file on exit
-            let result = server::start_server(config, config_path).await;
+            let result = server::start_server(config, config_path, log_state).await;
             let _ = pid::cleanup_pid();
             result?;
         }

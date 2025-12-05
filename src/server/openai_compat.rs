@@ -1,66 +1,54 @@
+use axum::{response::{IntoResponse, Response}, Json};
+use hyper::StatusCode;
 use serde::{Deserialize, Serialize};
-use crate::models::{AnthropicRequest, MessageContent, ContentBlock, SystemPrompt};
-use crate::providers::ProviderResponse;
+use serde_json::{json, Value};
+use tracing::{info, warn};
 
-/// OpenAI Chat Completions request format
-#[derive(Debug, Deserialize)]
+use super::error::AppError;
+use crate::models::{AnthropicRequest, Message, MessageContent, SystemPrompt, Tool, Usage};
+
+
+// Temporarily define AnthropicResponse and AnthropicResponseMessage here
+// These should ideally be in src/models/mod.rs or a specific provider module
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AnthropicResponse {
+    pub id: String,
+    pub r#type: String,
+    pub role: String,
+    pub model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_sequence: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
+    pub content: Vec<MessageContent>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AnthropicResponseMessage {
+    pub r#type: String,
+    pub text: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct OpenAIRequest {
     pub model: String,
     pub messages: Vec<OpenAIMessage>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_tokens: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub temperature: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub top_p: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stop: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stream: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<serde_json::Value>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_choice: Option<serde_json::Value>,
+    #[serde(default)]
+    pub stream: bool,
+    // Other fields can be added as needed
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct OpenAIMessage {
     pub role: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<OpenAIContent>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
+    pub content: String,
 }
 
-/// Content can be string or array of content parts
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum OpenAIContent {
-    String(String),
-    Parts(Vec<OpenAIContentPart>),
-}
-
-/// Content part (text or image_url)
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "type")]
-pub enum OpenAIContentPart {
-    #[serde(rename = "text")]
-    Text { text: String },
-    #[serde(rename = "image_url")]
-    ImageUrl { image_url: OpenAIImageUrl },
-}
-
-/// Image URL object
-#[derive(Debug, Clone, Deserialize)]
-pub struct OpenAIImageUrl {
-    pub url: String,
-}
-
-/// OpenAI Chat Completions response format
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct OpenAIResponse {
     pub id: String,
-    #[serde(rename = "object")]
     pub object: String,
     pub created: u64,
     pub model: String,
@@ -68,206 +56,144 @@ pub struct OpenAIResponse {
     pub usage: OpenAIUsage,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct OpenAIChoice {
     pub index: u32,
-    pub message: OpenAIResponseMessage,
-    pub finish_reason: Option<String>,
+    pub message: OpenAIMessage,
+    pub finish_reason: String,
 }
 
-#[derive(Debug, Serialize)]
-pub struct OpenAIResponseMessage {
-    pub role: String,
-    pub content: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct OpenAIUsage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
     pub total_tokens: u32,
 }
 
-/// Transform OpenAI request to Anthropic format
-pub fn transform_openai_to_anthropic(openai_req: OpenAIRequest) -> Result<AnthropicRequest, String> {
-    let mut messages = Vec::new();
-    let mut system_prompt: Option<SystemPrompt> = None;
+pub fn transform_openai_to_anthropic(
+    openai_request: OpenAIRequest,
+) -> Result<AnthropicRequest, String> {
+    let mut anthropic_messages: Vec<Message> = Vec::new();
+    let mut system_prompt: Option<String> = None;
 
-    // Process messages
-    for msg in openai_req.messages {
+    for msg in openai_request.messages {
         match msg.role.as_str() {
             "system" => {
-                // Extract system message
-                if let Some(content) = msg.content {
-                    let text = match content {
-                        OpenAIContent::String(s) => s,
-                        OpenAIContent::Parts(parts) => {
-                            parts.iter()
-                                .filter_map(|p| {
-                                    if let OpenAIContentPart::Text { text } = p {
-                                        Some(text.clone())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect::<Vec<_>>()
-                                .join("\n")
-                        }
-                    };
-                    system_prompt = Some(SystemPrompt::Text(text));
+                // OpenAI has a system message role, Anthropic uses a system prompt string
+                if system_prompt.is_some() {
+                    return Err("Multiple system messages found in OpenAI request".to_string());
                 }
+                system_prompt = Some(msg.content);
             }
-            "user" | "assistant" => {
-                // Convert user/assistant messages
-                let content = if let Some(openai_content) = msg.content {
-                    match openai_content {
-                        OpenAIContent::String(text) => MessageContent::Text(text),
-                        OpenAIContent::Parts(parts) => {
-                            let blocks: Vec<ContentBlock> = parts.iter()
-                                .filter_map(|part| {
-                                    match part {
-                                        OpenAIContentPart::Text { text } => {
-                                            Some(ContentBlock::Text { text: text.clone() })
-                                        }
-                                        OpenAIContentPart::ImageUrl { image_url } => {
-                                            // Parse data URL or external URL
-                                            if image_url.url.starts_with("data:") {
-                                                // data:image/png;base64,iVBORw0KG...
-                                                if let Some(comma_idx) = image_url.url.find(',') {
-                                                    let header = &image_url.url[..comma_idx];
-                                                    let data = &image_url.url[comma_idx + 1..];
-
-                                                    let media_type = if header.contains("image/jpeg") {
-                                                        "image/jpeg"
-                                                    } else if header.contains("image/png") {
-                                                        "image/png"
-                                                    } else if header.contains("image/gif") {
-                                                        "image/gif"
-                                                    } else if header.contains("image/webp") {
-                                                        "image/webp"
-                                                    } else {
-                                                        "image/png" // default
-                                                    };
-
-                                                    Some(ContentBlock::Image {
-                                                        source: crate::models::ImageSource {
-                                                            r#type: "base64".to_string(),
-                                                            media_type: Some(media_type.to_string()),
-                                                            data: Some(data.to_string()),
-                                                            url: None,
-                                                        }
-                                                    })
-                                                } else {
-                                                    None
-                                                }
-                                            } else {
-                                                // External URL
-                                                Some(ContentBlock::Image {
-                                                    source: crate::models::ImageSource {
-                                                        r#type: "url".to_string(),
-                                                        media_type: None,
-                                                        data: None,
-                                                        url: Some(image_url.url.clone()),
-                                                    }
-                                                })
-                                            }
-                                        }
-                                    }
-                                })
-                                .collect();
-
-                            if blocks.is_empty() {
-                                MessageContent::Text(String::new())
-                            } else {
-                                MessageContent::Blocks(blocks)
-                            }
-                        }
-                    }
-                } else {
-                    MessageContent::Text(String::new())
-                };
-
-                messages.push(crate::models::Message {
-                    role: msg.role,
-                    content,
-                });
-            }
-            _ => {
-                // Skip other roles (tool, function, etc.)
-                tracing::warn!("Skipping unsupported message role: {}", msg.role);
-            }
+            "user" => anthropic_messages.push(Message {
+                role: "user".to_string(), // Use string role
+                content: MessageContent::Text(msg.content),
+            }),
+            "assistant" => anthropic_messages.push(Message {
+                role: "assistant".to_string(), // Use string role
+                content: MessageContent::Text(msg.content),
+            }),
+            _ => return Err(format!("Unsupported OpenAI message role: {}", msg.role)),
         }
     }
 
     Ok(AnthropicRequest {
-        model: openai_req.model,
-        messages,
-        max_tokens: openai_req.max_tokens.unwrap_or(4096),
-        thinking: None,
-        temperature: openai_req.temperature,
-        top_p: openai_req.top_p,
+        model: openai_request.model,
+        messages: anthropic_messages,
+        system: system_prompt.map(|s| SystemPrompt::Text(s)), // Convert Option<String> to Option<SystemPrompt>
+        stream: Some(openai_request.stream),
+        // Map other fields as needed, or leave as default/None
+        max_tokens: 4096, // Default for now, should be configurable or mapped
+        temperature: None,
+        top_p: None,
         top_k: None,
-        stop_sequences: openai_req.stop,
-        stream: openai_req.stream,
+        stop_sequences: None,
+        tools: None,
+        thinking: None,
         metadata: None,
-        system: system_prompt,
-        tools: None, // TODO: Transform tools if needed
     })
 }
 
-/// Transform Anthropic response to OpenAI format
 pub fn transform_anthropic_to_openai(
-    anthropic_resp: ProviderResponse,
-    model: String,
+    anthropic_response: AnthropicResponse,
+    original_model: String,
 ) -> OpenAIResponse {
-    // Extract text content from content blocks
-    let content = anthropic_resp.content.iter()
-        .filter_map(|block| {
-            match block {
-                ContentBlock::Text { text } => Some(text.clone()),
-                _ => None,
+    let choices = anthropic_response
+        .content
+        .into_iter()
+        .filter_map(|msg_content| {
+            if let MessageContent::Text(text) = msg_content { // Use MessageContent
+                Some(OpenAIChoice {
+                    index: 0, // Anthropic response is typically a single choice
+                    message: OpenAIMessage {
+                        role: "assistant".to_string(), // Anthropic always responds as assistant
+                        content: text,
+                    },
+                    finish_reason: anthropic_response
+                        .stop_reason
+                        .unwrap_or("stop".to_string()),
+                })
+            } else {
+                warn!("Anthropic response contained non-text content, skipping for OpenAI conversion.");
+                None
             }
         })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let content = if content.is_empty() {
-        None
-    } else {
-        Some(content)
-    };
-
-    // Map finish_reason
-    let finish_reason = anthropic_resp.stop_reason.as_ref().map(|reason| {
-        match reason.as_str() {
-            "end_turn" => "stop",
-            "max_tokens" => "length",
-            "stop_sequence" => "stop",
-            _ => "stop",
-        }
-        .to_string()
-    });
+        .collect();
 
     OpenAIResponse {
-        id: anthropic_resp.id,
+        id: anthropic_response.id,
         object: "chat.completion".to_string(),
-        created: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs(),
-        model,
-        choices: vec![OpenAIChoice {
-            index: 0,
-            message: OpenAIResponseMessage {
-                role: anthropic_resp.role,
-                content,
-            },
-            finish_reason,
-        }],
+        created: anthropic_response.stop_sequence.map_or(0, |_| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+        }),
+        model: original_model,
+        choices,
         usage: OpenAIUsage {
-            prompt_tokens: anthropic_resp.usage.input_tokens,
-            completion_tokens: anthropic_resp.usage.output_tokens,
-            total_tokens: anthropic_resp.usage.input_tokens + anthropic_resp.usage.output_tokens,
+            prompt_tokens: anthropic_response
+                .usage
+                .as_ref()
+                .map_or(0, |u| u.input_tokens),
+            completion_tokens: anthropic_response
+                .usage
+                .as_ref()
+                .map_or(0, |u| u.output_tokens),
+            total_tokens: anthropic_response
+                .usage
+                .as_ref()
+                .map_or(0, |u| u.input_tokens + u.output_tokens),
         },
     }
+}
+
+// Handler for /v1/models
+pub async fn open_ai_compat_models() -> impl IntoResponse {
+    Json(json!({
+        "object": "list",
+        "data": [
+            {
+                "id": "gpt-4",
+                "object": "model",
+                "created": 1677649551,
+                "owned_by": "openai",
+            },
+            {
+                "id": "gpt-3.5-turbo",
+                "object": "model",
+                "created": 1677649551,
+                "owned_by": "openai",
+            },
+            // Add other supported models here
+        ]
+    }))
+}
+
+pub async fn open_ai_compat_completions() -> Result<Response, AppError> {
+    Ok((
+        StatusCode::NOT_IMPLEMENTED,
+        "The /v1/completions endpoint is not yet supported in this OpenAI compatibility layer. Please use /v1/chat/completions.",
+    )
+        .into_response())
 }

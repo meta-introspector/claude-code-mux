@@ -15,6 +15,8 @@ path = "src/main.rs"
 [dependencies]
 # Web Framework
 axum = "0.7"
+axum-extra = "0.7"
+hyper = { version = "1", features = ["client", "http1", "http2"] }
 tower = "0.4"
 tower-http = { version = "0.5", features = ["fs", "trace", "cors"] }
 
@@ -26,6 +28,7 @@ futures = "0.3"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+simd-json = "0.17.0"
 
 # HTTP Client
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "native-tls", "native-tls-vendored"] }
@@ -44,7 +47,7 @@ tiktoken-rs = "0.5"
 
 # Logging
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
 # Error Handling
 anyhow = "1"
@@ -56,14 +59,16 @@ once_cell = "1"            # Lazy statics
 async-trait = "0.1"        # Async trait support
 dirs = "5"                 # User directories
 regex = "1"                # Regular expressions
+uuid = { version = "1", features = ["v4", "serde"] } # For request IDs
 
 # OAuth & Auth
-oauth2 = "4"               # OAuth 2.0 client
+oauth2 = { version = "4", features = ["openidconnect"] } # OAuth 2.0 client
 base64 = "0.22"            # Base64 encoding
 sha2 = "0.10"              # SHA-256 for PKCE
 rand = "0.8"               # Random generation for PKCE
 chrono = { version = "0.4", features = ["serde"] }  # Timestamps
 url = "2"                  # URL parsing
+async-stream = "0.3.6"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", features = ["signal"] }  # Unix signals
@@ -92,3 +97,8 @@ opt-level = 0
 
 [profile.test]
 opt-level = 0
+
+[workspace]
+members = [ "code_editor",
+    "refactor_server_mod",
+]
