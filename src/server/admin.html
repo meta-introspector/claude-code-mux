@@ -200,6 +200,13 @@
                         >
                             Test
                         </button>
+                        <button
+                            onclick="showTab('logs')"
+                            id="tab-logs"
+                            class="w-full text-left px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors text-[15px] text-gray-600"
+                        >
+                            Logs
+                        </button>
                     </nav>
                 </div>
 
@@ -1287,6 +1294,7 @@
                                 <p class="text-gray-600 mb-8">
                                     Optional - only if needed
                                 </p>
+
                                 <div>
                                     <label class="label"
                                         >Custom Endpoint (Optional)</label
@@ -1983,6 +1991,26 @@
                         </div>
                     </div>
                 </div>
+
+                 <!-- Logs Tab -->
+                <div id="content-logs" class="tab-content hidden">
+                    <h1 class="text-4xl font-bold mb-3">Live Logs</h1>
+                    <p class="text-gray-600 text-lg mb-12">
+                        Real-time stream of server events.
+                    </p>
+
+                    <div class="card">
+                        <div class="flex justify-between items-center mb-4">
+                            <h2 class="text-2xl font-bold">Log Stream</h2>
+                            <div class="text-sm text-gray-500">
+                                Event Count: <span id="log-count" class="font-semibold">0</span>
+                            </div>
+                        </div>
+                        <div class="bg-gray-900 text-white font-mono text-xs rounded-lg p-4 h-96 overflow-y-auto">
+                            <pre id="log-container"></pre>
+                        </div>
+                    </div>
+                </div>
             </main>
         </div>
 
@@ -1997,7 +2025,90 @@
 
             // Notification Helper
             function notify(message, status = "primary") {
-                if (typeof UIkit === "undefined" || !UIkit.notification) {
+                // This is a placeholder. You might use a library like Noty or Toastify.
+                alert(`${status.toUpperCase()}: ${message}`);
+            }
+
+            function showTab(tabName) {
+                // Hide all content
+                document.querySelectorAll(".tab-content").forEach((el) => {
+                    el.classList.add("hidden");
+                });
+                // Deactivate all tabs
+                document.querySelectorAll("aside nav button").forEach((el) => {
+                    el.classList.remove("tab-active");
+                });
+
+                // Show selected content and activate tab
+                document.getElementById(`content-${tabName}`).classList.remove("hidden");
+                document.getElementById(`tab-${tabName}`).classList.add("tab-active");
+            }
+            
+            document.addEventListener("DOMContentLoaded", () => {
+                showTab('overview');
+                loadConfig();
+                initLogStream(); // Initialize the log stream
+            });
+
+            // --- Log Streaming ---
+            function initLogStream() {
+                const logContainer = document.getElementById("log-container");
+                const logCountEl = document.getElementById("log-count");
+                let logCount = 0;
+                const maxLogLines = 500; // To prevent performance issues
+
+                const evtSource = new EventSource("/api/logs/stream");
+
+                evtSource.onmessage = function (event) {
+                    const newLogEntry = document.createElement("div");
+                    newLogEntry.textContent = event.data;
+                    logContainer.appendChild(newLogEntry);
+
+                    logCount++;
+                    logCountEl.textContent = logCount;
+
+                    // Keep the log container scrolled to the bottom
+                    logContainer.parentElement.scrollTop = logContainer.parentElement.scrollHeight;
+
+                    // Prune old logs if buffer is full
+                    if (logContainer.children.length > maxLogLines) {
+                        logContainer.removeChild(logContainer.firstChild);
+                    }
+                };
+
+                evtSource.onerror = function (err) {
+                    console.error("EventSource failed:", err);
+                    const errorEntry = document.createElement("div");
+                    errorEntry.textContent = "--- Log stream disconnected. Retrying... ---";
+                    errorEntry.style.color = "#f87171"; // text-red-400
+                    logContainer.appendChild(errorEntry);
+                    logContainer.parentElement.scrollTop = logContainer.parentElement.scrollHeight;
+                };
+            }
+
+            // --- Configuration Management ---
+            async function loadConfig() {
+                try {
+                    const response = await fetch("/api/config/json");
+                    if (!response.ok) throw new Error("Failed to load config");
+                    const data = await response.json();
+                    appState.config = data;
+                    appState.loaded = true;
+                    console.log("Config loaded:", appState.config);
+                    
+                    // Update UI
+                    updateOverview();
+                    renderModels();
+                    renderProviders();
+                    populateRouterForm();
+                    populateSettingsForm();
+                    populateTestModels();
+
+                } catch (error) {
+                    console.error("Error loading config:", error);
+                    notify(`Failed to load server config: ${error.message}`, "error");
+                }
+            }
                     // Fallback to alert if UIkit is not loaded
                     alert(message);
                     return;

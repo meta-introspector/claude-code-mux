@@ -1,0 +1,50 @@
+# edit_job.toml
+# This file describes a series of code modifications to be applied to the project.
+
+# --- Edits for src/server/state.rs ---
+[[edits]]
+type = "ReplaceFileContentFromFile"
+target_file = "src/server/state.rs"
+source_file = ".gemini/tmp/code_editor_temp/state.rs.tmp"
+
+# --- Edits for src/server/error.rs ---
+[[edits]]
+type = "ReplaceFileContentFromFile"
+target_file = "src/server/error.rs"
+source_file = ".gemini/tmp/code_editor_temp/error.rs.tmp"
+
+# --- Edits for src/server/config_update.rs ---
+[[edits]]
+type = "ReplaceFileContentFromFile"
+target_file = "src/server/config_update.rs"
+source_file = ".gemini/tmp/code_editor_temp/config_update.rs.tmp"
+
+# --- Edits for src/server/utils.rs ---
+[[edits]]
+type = "ReplaceFileContentFromFile"
+target_file = "src/server/utils.rs"
+source_file = ".gemini/tmp/code_editor_temp/utils.rs.tmp"
+
+# --- Edits for src/server/oauth_handlers.rs ---
+[[edits]]
+type = "ReplaceFileContentFromFile"
+target_file = "src/server/oauth_handlers.rs"
+source_file = ".gemini/tmp/code_editor_temp/oauth_handlers.rs.tmp"
+
+# --- Edits for src/server/openai_compat.rs ---
+[[edits]]
+type = "ReplaceFileContentFromFile"
+target_file = "src/server/openai_compat.rs"
+source_file = ".gemini/tmp/code_editor_temp/openai_compat.rs.tmp"
+
+# --- Edits for src/server/handlers.rs ---
+[[edits]]
+type = "ReplaceFileContentFromFile"
+target_file = "src/server/handlers.rs"
+source_file = ".gemini/tmp/code_editor_temp/handlers_full.rs.tmp"
+
+# --- Edit to rewrite src/server/mod.rs ---
+[[edits]]
+type = "ReplaceFileContentFromFile"
+target_file = "src/server/mod.rs"
+source_file = ".gemini/tmp/code_editor_temp/mod.rs.tmp"

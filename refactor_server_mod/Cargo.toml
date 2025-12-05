@@ -1,0 +1,12 @@
+[package]
+name = "refactor_server_mod"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+syn = { version = "2", features = ["full", "visit-mut"] } # Explicitly add visit-mut
+quote = "1"
+proc-macro2 = "1"
+anyhow = "1"
+fs_extra = "1"
+prettyplease = "0.2.17" # Add prettyplease

@@ -1,0 +1,4 @@
+/// Get models configuration
+pub async fn get_models_config(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    Json(state.config.models.clone())
+}

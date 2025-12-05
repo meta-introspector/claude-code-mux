@@ -1,0 +1,4 @@
+/// Get providers configuration
+pub async fn get_providers(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    Json(state.config.providers.clone())
+}

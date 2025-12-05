@@ -1,0 +1,114 @@
+/// Handle /v1/messages/count_tokens requests
+pub async fn handle_count_tokens(
+    State(state): State<Arc<AppState>>,
+    Json(request_json): Json<serde_json::Value>,
+) -> Result<Response, AppError> {
+    let model = request_json.get("model").and_then(|m| m.as_str()).unwrap_or("unknown");
+    info!("Received count_tokens request for model: {}", model);
+
+    // 1. Parse as CountTokensRequest first
+    use crate::models::CountTokensRequest;
+    let count_request: CountTokensRequest = serde_json::from_value(request_json.clone())
+        .map_err(|e| AppError::ParseError(format!("Invalid count_tokens request format: {}", e)))?;
+
+    // 2. Create a minimal AnthropicRequest for routing
+    let mut routing_request = AnthropicRequest {
+        model: count_request.model.clone(),
+        messages: count_request.messages.clone(),
+        max_tokens: 1024, // Dummy value for routing
+        system: count_request.system.clone(),
+        tools: count_request.tools.clone(),
+        thinking: None,
+        temperature: None,
+        top_p: None,
+        top_k: None,
+        stop_sequences: None,
+        stream: None,
+        metadata: None,
+    };
+    let decision = state
+        .router
+        .route(&mut routing_request)
+        .map_err(|e| AppError::RoutingError(e.to_string()))?;
+
+    info!(
+        "🧮 Routed count_tokens: {} → {} ({})",
+        model,
+        decision.model_name,
+        decision.route_type
+    );
+
+    // 3. Try model mappings with fallback (1:N mapping)
+    if let Some(model_config) = state.config.models.iter().find(|m| m.name == decision.model_name) {
+        info!("📋 Found {} provider mappings for token counting: {}", model_config.mappings.len(), decision.model_name);
+
+        // Sort mappings by priority
+        let mut sorted_mappings = model_config.mappings.clone();
+        sorted_mappings.sort_by_key(|m| m.priority);
+
+        // Try each mapping in priority order
+        for (idx, mapping) in sorted_mappings.iter().enumerate() {
+            info!(
+                "🔄 Trying token count mapping {}/{}: provider={}, actual_model={}",
+                idx + 1,
+                sorted_mappings.len(),
+                mapping.provider,
+                mapping.actual_model
+            );
+
+            // Try to get provider from registry
+            if let Some(provider) = state.provider_registry.get_provider(&mapping.provider) {
+                // Trust the model mapping configuration - no need to validate
+
+                // Update model to actual model name
+                let mut count_request_for_provider = count_request.clone();
+                count_request_for_provider.model = mapping.actual_model.clone();
+
+                // Call provider's count_tokens
+                match provider.count_tokens(count_request_for_provider).await {
+                    Ok(response) => {
+                        info!("✅ Token count succeeded with provider: {}", mapping.provider);
+                        return Ok(Json(response).into_response());
+                    }
+                    Err(e) => {
+                        info!("⚠️ Provider {} failed: {}, trying next fallback", mapping.provider, e);
+                        continue;
+                    }
+                }
+            } else {
+                info!("⚠️ Provider {} not found in registry, trying next fallback", mapping.provider);
+                continue;
+            }
+        }
+
+        error!("❌ All provider mappings failed for token counting: {}", decision.model_name);
+        return Err(AppError::ProviderError(format!(
+            "All {} provider mappings failed for token counting: {}",
+            sorted_mappings.len(),
+            decision.model_name
+        )));
+    } else {
+        // No model mapping found, try direct provider registry lookup (backward compatibility)
+        if let Ok(provider) = state.provider_registry.get_provider_for_model(&decision.model_name) {
+            info!("📦 Using provider from registry (direct lookup) for token counting: {}", decision.model_name);
+
+            // Update model to routed model
+            let mut count_request_for_provider = count_request.clone();
+            count_request_for_provider.model = decision.model_name.clone();
+
+            // Call provider's count_tokens
+            let response = provider.count_tokens(count_request_for_provider)
+                .await
+                .map_err(|e| AppError::ProviderError(e.to_string()))?;
+
+            info!("✅ Token count completed via provider");
+            return Ok(Json(response).into_response());
+        }
+
+        error!("❌ No model mapping or provider found for token counting: {}", decision.model_name);
+        return Err(AppError::ProviderError(format!(
+            "No model mapping or provider found for token counting: {}",
+            decision.model_name
+        )));
+    }
+}

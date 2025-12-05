@@ -1,0 +1,14 @@
+[package]
+name = "code_editor"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+syn = { version = "2", features = ["full", "visit-mut"] }
+quote = "1"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+prettyplease = "0.2.17"
+clap = { version = "4", features = ["derive"] } # Add clap
+proc-macro2 = "1.0.103"

@@ -1,0 +1,5 @@
+/// REMOVED: This endpoint was for LiteLLM integration which has been removed.
+/// Models are now managed through the provider registry and config.
+pub async fn get_models(State(_state): State<Arc<AppState>>) -> Result<Json<serde_json::Value>, AppError> {
+    Err(AppError::ParseError("This endpoint has been removed. Use /api/models-config instead.".to_string()))
+}

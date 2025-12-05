@@ -1,0 +1,193 @@
+/// Handle /v1/messages requests (both streaming and non-streaming)
+pub async fn handle_messages(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request_json): Json<serde_json::Value>,
+) -> Result<Response, AppError> {
+    let model = request_json
+        .get("model")
+        .and_then(|m| m.as_str())
+        .unwrap_or("unknown");
+    info!("Received request for model: {}", model);
+
+    // DEBUG: Log request body for debugging
+    if let Ok(json_str) = serde_json::to_string_pretty(&request_json) {
+        tracing::debug!("📥 Incoming request body:\n{}", json_str);
+    }
+
+    // 1. Parse request for routing decision (mutable for tag extraction)
+    let mut request_for_routing: AnthropicRequest = serde_json::from_value(request_json.clone())
+        .map_err(|e| {
+            tracing::error!("❌ Failed to parse request: {}", e);
+            AppError::ParseError(format!("Invalid request format: {}", e))
+        })?;
+
+    // 2. Route the request (may modify system prompt to remove CCM-SUBAGENT-MODEL tag)
+    let decision = state
+        .router
+        .route(&mut request_for_routing)
+        .map_err(|e| AppError::RoutingError(e.to_string()))?;
+
+    info!(
+        "🎯 Routed to: {} ({})",
+        decision.model_name,
+        decision.route_type
+    );
+
+    // 3. Try model mappings with fallback (1:N mapping)
+    if let Some(model_config) = state.config.models.iter().find(|m| m.name == decision.model_name) {
+        info!("📋 Found {} provider mappings for model: {}", model_config.mappings.len(), decision.model_name);
+
+        // Check for X-Provider header to override priority
+        let forced_provider = headers
+            .get("x-provider")
+            .and_then(|v| v.to_str().ok())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+
+        if let Some(ref provider_name) = forced_provider {
+            info!("🎯 Using forced provider from X-Provider header: {}", provider_name);
+        }
+
+        // Sort mappings by priority (or filter by forced provider)
+        let mut sorted_mappings = model_config.mappings.clone();
+
+        if let Some(ref provider_name) = forced_provider {
+            // Filter to only the specified provider
+            sorted_mappings.retain(|m| m.provider == *provider_name);
+            if sorted_mappings.is_empty() {
+                return Err(AppError::RoutingError(format!(
+                    "Provider '{}' not found in mappings for model '{}'",
+                    provider_name,
+                    decision.model_name
+                )));
+            }
+        } else {
+            // Use priority ordering
+            sorted_mappings.sort_by_key(|m| m.priority);
+        }
+
+        // Try each mapping in priority order (or just the forced one)
+        for (idx, mapping) in sorted_mappings.iter().enumerate() {
+            info!(
+                "🔄 Trying mapping {}/{}: provider={}, actual_model={}",
+                idx + 1,
+                sorted_mappings.len(),
+                mapping.provider,
+                mapping.actual_model
+            );
+
+            // Try to get provider from registry
+            if let Some(provider) = state.provider_registry.get_provider(&mapping.provider) {
+                // Trust the model mapping configuration - no need to validate
+
+                // Parse request as Anthropic format
+                let mut anthropic_request: AnthropicRequest = serde_json::from_value(request_json.clone())
+                    .map_err(|e| AppError::ParseError(format!("Invalid request format: {}", e)))
+                    ?;
+
+                // Save original model name for response
+                let original_model = anthropic_request.model.clone();
+
+                // Update model to actual model name
+                anthropic_request.model = mapping.actual_model.clone();
+
+                // Update system if modified during routing
+                anthropic_request.system = request_for_routing.system.clone();
+
+                // Check if streaming is requested
+                let is_streaming = anthropic_request.stream == Some(true);
+
+                if is_streaming {
+                    // Streaming request
+                    info!("🌊 Streaming request to provider: {}", mapping.provider);
+
+                    match provider.send_message_stream(anthropic_request).await {
+                        Ok(stream) => {
+                            info!("✅ Streaming request started with provider: {}", mapping.provider);
+
+                            // Convert byte stream to SSE response
+                            // The provider returns raw bytes (SSE format), we pass them through
+                            let sse_stream = stream.map(|result| {
+                                result.map(|bytes| {
+                                    // Convert bytes to string for SSE event
+                                    let data = String::from_utf8_lossy(&bytes).to_string();
+                                    Event::default().data(data)
+                                }).map_err(|e| {
+                                    error!("Stream error: {}", e);
+                                    std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+                                })
+                            });
+
+                            return Ok(Sse::new(sse_stream).into_response());
+                        }
+                        Err(e) => {
+                            info!("⚠️ Provider {} streaming failed: {}, trying next fallback", mapping.provider, e);
+                            continue;
+                        }
+                    }
+                } else {
+                    // Non-streaming request (original behavior)
+                    match provider.send_message(anthropic_request).await {
+                        Ok(mut response) => {
+                            // Restore original model name in response
+                            response.model = original_model;
+                            info!("✅ Request succeeded with provider: {}, response model: {}", mapping.provider, response.model);
+                            return Ok(Json(response).into_response());
+                        }
+                        Err(e) => {
+                            info!("⚠️ Provider {} failed: {}, trying next fallback", mapping.provider, e);
+                            continue;
+                        }
+                    }
+                }
+            } else {
+                info!("⚠️ Provider {} not found in registry, trying next fallback", mapping.provider);
+                continue;
+            }
+        }
+
+        error!("❌ All provider mappings failed for model: {}", decision.model_name);
+        return Err(AppError::ProviderError(format!(
+            "All {} provider mappings failed for model: {}",
+            sorted_mappings.len(),
+            decision.model_name
+        )));
+    } else {
+        // No model mapping found, try direct provider registry lookup (backward compatibility)
+        if let Ok(provider) = state.provider_registry.get_provider_for_model(&decision.model_name) {
+            info!("📦 Using provider from registry (direct lookup): {}", decision.model_name);
+
+            // Parse request as Anthropic format
+            let mut anthropic_request: AnthropicRequest = serde_json::from_value(request_json.clone())
+                .map_err(|e| AppError::ParseError(format!("Invalid request format: {}", e)))
+                ?;
+
+            // Save original model name for response
+            let original_model = anthropic_request.model.clone();
+
+            // Update model to routed model
+            anthropic_request.model = decision.model_name.clone();
+
+            // Update system if modified during routing
+            anthropic_request.system = request_for_routing.system.clone();
+
+            // Call provider
+            let mut provider_response = provider.send_message(anthropic_request)
+                .await
+                .map_err(|e| AppError::ProviderError(e.to_string()))?;
+
+            // Restore original model name in response
+            provider_response.model = original_model;
+
+            // Return provider response
+            return Ok(Json(provider_response).into_response());
+        }
+
+        error!("❌ No model mapping or provider found for model: {}", decision.model_name);
+        return Err(AppError::ProviderError(format!(
+            "No model mapping or provider found for model: {}",
+            decision.model_name
+        )));
+    }
+}

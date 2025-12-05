@@ -1,0 +1,90 @@
+/// Update configuration via JSON (for admin UI)
+pub async fn update_config_json(
+    State(state): State<Arc<AppState>>,
+    Json(mut new_config): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    // Remove null values (TOML doesn't support null)
+    remove_null_values(&mut new_config);
+
+    // Write back to config file
+    let config_path = &state.config_path;
+
+    // Read current config
+    let config_str = std::fs::read_to_string(config_path)
+        .map_err(|e| AppError::ParseError(format!("Failed to read config: {}", e)))?;
+
+    let mut config: toml::Value = toml::from_str(&config_str)
+        .map_err(|e| AppError::ParseError(format!("Failed to parse config: {}", e)))?;
+
+    // Update providers section
+    if let Some(providers) = new_config.get("providers") {
+        // Convert from serde_json::Value to toml::Value
+        let providers_toml: toml::Value = serde_json::from_str(&providers.to_string())
+            .map_err(|e| AppError::ParseError(format!("Failed to convert providers: {}", e)))?;
+
+        if let Some(table) = config.as_table_mut() {
+            table.insert("providers".to_string(), providers_toml);
+        }
+    }
+
+    // Update models section
+    if let Some(models) = new_config.get("models") {
+        // Convert from serde_json::Value to toml::Value
+        let models_toml: toml::Value = serde_json::from_str(&models.to_string())
+            .map_err(|e| AppError::ParseError(format!("Failed to convert models: {}", e)))?;
+
+        if let Some(table) = config.as_table_mut() {
+            table.insert("models".to_string(), models_toml);
+        }
+    }
+
+    // Update router section if provided
+    if let Some(router) = new_config.get("router") {
+        if let Some(router_table) = config.get_mut("router").and_then(|v| v.as_table_mut()) {
+            if let Some(default) = router.get("default") {
+                if let Some(s) = default.as_str() {
+                    router_table.insert("default".to_string(), toml::Value::String(s.to_string()));
+                }
+            }
+            if let Some(think) = router.get("think") {
+                if let Some(s) = think.as_str() {
+                    router_table.insert("think".to_string(), toml::Value::String(s.to_string()));
+                }
+            }
+            if let Some(ws) = router.get("websearch") {
+                if let Some(s) = ws.as_str() {
+                    router_table.insert("websearch".to_string(), toml::Value::String(s.to_string()));
+                }
+            }
+            if let Some(bg) = router.get("background") {
+                if let Some(s) = bg.as_str() {
+                    router_table.insert("background".to_string(), toml::Value::String(s.to_string()));
+                }
+            }
+            if let Some(auto_map) = router.get("auto_map_regex") {
+                if let Some(s) = auto_map.as_str() {
+                    router_table.insert("auto_map_regex".to_string(), toml::Value::String(s.to_string()));
+                }
+            }
+            if let Some(bg_regex) = router.get("background_regex") {
+                if let Some(s) = bg.as_str() {
+                    router_table.insert("background_regex".to_string(), toml::Value::String(s.to_string()));
+                }
+            }
+        }
+    }
+
+    // Write back to file
+    let new_config_str = toml::to_string_pretty(&config)
+        .map_err(|e| AppError::ParseError(format!("Failed to serialize config: {}", e)))?;
+
+    std::fs::write(config_path, new_config_str)
+        .map_err(|e| AppError::ParseError(format!("Failed to write config: {}", e)))?;
+
+    info!("✅ Configuration updated successfully");
+
+    Ok(Json(serde_json::json!({ // Changed to Json
+        "status": "success",
+        "message": "Configuration saved successfully"
+    })))
+}

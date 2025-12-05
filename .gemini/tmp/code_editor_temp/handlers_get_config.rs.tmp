@@ -1,0 +1,15 @@
+/// Get current routing configuration
+pub async fn get_config(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    Json(serde_json::json!({
+        "server": {
+            "host": state.config.server.host,
+            "port": state.config.server.port,
+        },
+        "router": {
+            "default": state.config.router.default,
+            "background": state.config.router.background,
+            "think": state.config.router.think,
+            "websearch": state.config.router.websearch,
+        }
+    }))
+}
