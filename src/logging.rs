@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use tokio::sync::RwLock; // Changed from std::sync::RwLock
 use tracing::{field::Field, field::Visit, Event, Subscriber};
 use tracing_subscriber::{layer::Context, registry::LookupSpan, Layer};
 
@@ -33,13 +34,13 @@ impl Visit for LogVisitor {
 /// A tracing layer that stores logs in a ring buffer and on disk.
 #[derive(Debug)]
 pub struct QueryableLogLayer {
-    buffer: Arc<RwLock<VecDeque<LogEntry>>>,
-    log_file: Arc<RwLock<File>>,
+    buffer: Arc<RwLock<VecDeque<LogEntry>>>, // Changed to tokio::sync::RwLock
+    log_file: Arc<RwLock<File>>,             // Changed to tokio::sync::RwLock
 }
 
 impl QueryableLogLayer {
     pub fn new(
-        buffer: Arc<RwLock<VecDeque<LogEntry>>>,
+        buffer: Arc<RwLock<VecDeque<LogEntry>>>, // Changed to tokio::sync::RwLock
         log_file_path: &str,
     ) -> anyhow::Result<Self> {
         let file = OpenOptions::new()
@@ -72,19 +73,17 @@ where
             };
 
             // Write to in-memory ring buffer
-            if let Ok(mut buffer) = self.buffer.write() {
-                buffer.push_back(log_entry.clone());
-                // Keep the buffer at a max size, e.g., 1000 entries
-                if buffer.len() > 1000 {
-                    buffer.pop_front();
-                }
+            let mut buffer = tokio::runtime::Handle::current().block_on(self.buffer.write()); // Used block_on and directly get the guard
+            buffer.push_back(log_entry.clone());
+            // Keep the buffer at a max size, e.g., 1000 entries
+            if buffer.len() > 1000 {
+                buffer.pop_front();
             }
 
             // Write to disk
-            if let Ok(mut file) = self.log_file.write() {
-                if let Ok(json) = serde_json::to_string(&log_entry) {
-                    let _ = writeln!(file, "{}", json);
-                }
+            let mut file = tokio::runtime::Handle::current().block_on(self.log_file.write()); // Used block_on and directly get the guard
+            if let Ok(json) = serde_json::to_string(&log_entry) {
+                let _ = writeln!(file, "{}", json);
             }
         }
     }

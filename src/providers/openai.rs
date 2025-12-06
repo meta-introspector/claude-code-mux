@@ -570,7 +570,7 @@ impl OpenAIProvider {
         // Parse JSON and extract chatgpt_account_id from the correct claim path
         let json: serde_json::Value = serde_json::from_str(&json_str).ok()?;
         json.get("https://api.openai.com/auth")?
-            .get("chatgpt_account_id")?
+            .get("chatgpt_account_id")? 
             .as_str()
             .map(|s| s.to_string())
     }
@@ -655,7 +655,7 @@ impl OpenAIProvider {
                                 // Convert Anthropic image format to OpenAI format
                                 let url = if source.r#type == "base64" {
                                     // data:image/{media_type};base64,{data}
-                                    let media_type = source.media_type.as_ref()
+                                    let media_type = source.media_type.as_ref() 
                                         .map(|s| s.as_str())
                                         .unwrap_or("image/png");
                                     let data = source.data.as_ref()
@@ -754,7 +754,7 @@ impl OpenAIProvider {
 
     /// Transform OpenAI response to Anthropic format
     fn transform_response(&self, response: OpenAIResponse) -> ProviderResponse {
-        let choice = response.choices.into_iter().next()
+        let choice = response.choices.into_iter().next() 
             .expect("OpenAI response must have at least one choice");
 
         // Extract text from content or reasoning (for GLM models via Cerebras)
@@ -906,7 +906,6 @@ impl AnthropicProvider for OpenAIProvider {
             if !response.status().is_success() {
                 let status = response.status().as_u16();
                 let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                tracing::error!("Responses API error ({}): {}", status, error_text);
                 return Err(ProviderError::ApiError {
                     status,
                     message: error_text,

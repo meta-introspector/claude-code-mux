@@ -1,14 +1,16 @@
 use clap::{Parser, Subcommand};
 use claude_code_mux::{
-    cli::AppConfig,
-    logging::{LogEntry, QueryableLogLayer},
+    logging::{QueryableLogLayer},
     pid,
-    server::{self, LogState},
+    server::{self},
 };
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use tokio::sync::RwLock; // Added
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use claude_code_mux::config::AppConfig; // Corrected
+use crate::server::state::LogState; // Added
 
 #[derive(Parser)]
 #[command(name = "ccm")]
@@ -45,8 +47,10 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    dotenv::dotenv().ok();
+
     // --- Set up Queryable Logging ---
-    let log_buffer = Arc::new(RwLock::new(VecDeque::with_capacity(1000)));
+    let log_buffer = Arc::new(RwLock::new(VecDeque::with_capacity(1000))); // Changed to tokio::sync::RwLock
 
     // Ensure logs directory exists
     let log_dir = "logs";
@@ -76,12 +80,12 @@ async fn main() -> anyhow::Result<()> {
     // Get config path (use default if not specified)
     let config_path = match &cli.config {
         Some(path) => path.clone(),
-        None => cli::AppConfig::default_path()
+        None => AppConfig::default_path() // Changed from cli::AppConfig
             .unwrap_or_else(|_| PathBuf::from("config/default.toml")),
     };
 
     // Load configuration
-    let config = cli::AppConfig::from_file(&config_path)?;
+    let config = AppConfig::from_file(&config_path)?; // Changed from cli::AppConfig
 
     match cli.command {
         Commands::Start { port } => {
@@ -121,7 +125,7 @@ async fn main() -> anyhow::Result<()> {
             println!("Press Ctrl+C to stop");
 
             // Cleanup PID file on exit
-            let result = server::start_server(config, config_path, log_state).await;
+            let result = server::start_server(config.clone(), config_path.clone(), log_state).await;
             let _ = pid::cleanup_pid();
             result?;
         }

@@ -131,6 +131,7 @@ pub fn transform_anthropic_to_openai(
                     },
                     finish_reason: anthropic_response
                         .stop_reason
+                        .clone() // Added clone here
                         .unwrap_or("stop".to_string()),
                 })
             } else {

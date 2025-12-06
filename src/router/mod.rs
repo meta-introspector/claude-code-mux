@@ -1,4 +1,4 @@
-use crate::cli::AppConfig;
+use crate::config::AppConfig;
 use crate::models::{AnthropicRequest, RouteDecision, RouteType, SystemPrompt};
 use anyhow::Result;
 use regex::Regex;
@@ -415,3 +415,4 @@ mod tests {
         assert_eq!(decision.model_name, "glm-4.6"); // Uses original model name (no auto-mapping)
     }
 }
+

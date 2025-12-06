@@ -2,7 +2,7 @@ use super::state::{AppState, LogState};
 use super::error::AppError;
 use super::config_update::ConfigUpdate;
 use super::utils::{remove_null_values, create_and_execute_restart_script};
-use crate::cli::AppConfig;
+use crate::config::AppConfig;
 use crate::models::{AnthropicRequest, CountTokensRequest};
 use crate::router::Router as AppRouter;
 use crate::providers::ProviderRegistry;
@@ -28,6 +28,10 @@ use serde_json::Value; // Added this import
 /// Serve Admin UI
 pub async fn serve_admin() -> impl IntoResponse {
     Html(include_str!("admin.html")) // Adjusted path
+}
+
+pub async fn root() -> impl IntoResponse {
+    Redirect::to("/admin")
 }
 
 /// Health check endpoint
@@ -224,6 +228,14 @@ pub async fn update_config_json(
     })))
 }
 
+/// Restart the server (uses external script)
+pub async fn restart_server(State(state): State<Arc<AppState>>) -> anyhow::Result<impl IntoResponse, AppError> { // Corrected return type
+    info!("Attempting to restart server...");
+    let config = state.config.read().await;
+    create_and_execute_restart_script(config.server.port)?;
+    Ok(Html("<div class='px-4 py-3 rounded-xl bg-primary/20 border border-primary/50 text-foreground text-sm'>✅ Server restarting...</div>".to_string()))
+}
+
 /// Handle /v1/chat/completions requests (OpenAI-compatible endpoint)
 pub async fn handle_openai_chat_completions(
     State(state): State<Arc<AppState>>,
@@ -308,7 +320,7 @@ pub async fn handle_openai_chat_completions(
                     // Streaming request
                     info!("🌊 Streaming request to provider: {}", mapping.provider);
 
-                    match provider.send_message_stream(anthropic_request).await {
+                    match provider.send_message_stream(anthropic_request.clone()).await {
                         Ok(stream) => {
                             info!("✅ Streaming request started with provider: {}", mapping.provider);
 
@@ -334,10 +346,10 @@ pub async fn handle_openai_chat_completions(
                     }
                 } else {
                     // Non-streaming request (original behavior)
-                    match provider.send_message(anthropic_request).await {
+                    match provider.send_message(anthropic_request.clone()).await {
                         Ok(mut response) => {
                             // Restore original model name in response
-                            response.model = original_model;
+                            response.model = model;
                             info!("✅ Request succeeded with provider: {}, response model: {}", mapping.provider, response.model);
                             return Ok(Json(response).into_response());
                         }
@@ -368,13 +380,36 @@ pub async fn handle_openai_chat_completions(
             anthropic_request.model = decision.model_name.clone();
 
             // Call provider
-            let anthropic_response = provider.send_message(anthropic_request) 
+            let provider_response = provider.send_message(anthropic_request) 
                 .await
                 .map_err(|e| AppError::ProviderError(e.to_string()))?;
 
+            // Convert ProviderResponse to openai_compat::AnthropicResponse
+            let converted_anthropic_response = openai_compat::AnthropicResponse {
+                id: provider_response.id,
+                r#type: provider_response.r#type,
+                role: provider_response.role,
+                model: provider_response.model,
+                stop_reason: provider_response.stop_reason,
+                stop_sequence: provider_response.stop_sequence,
+                usage: Some(crate::models::Usage { // Convert providers::Usage to models::Usage
+                    input_tokens: provider_response.usage.input_tokens,
+                    output_tokens: provider_response.usage.output_tokens,
+                }),
+                content: provider_response.content.into_iter().filter_map(|block| {
+                    if let crate::models::ContentBlock::Text { text } = block {
+                        Some(crate::models::MessageContent::Text(text))
+                    } else {
+                        // Handle other block types if necessary, or ignore them for OpenAI compat
+                        warn!("Provider response contained non-text content for OpenAI conversion, skipping block: {:?}", block);
+                        None
+                    }
+                }).collect(),
+            };
+
             // Transform to OpenAI format
             let openai_response = openai_compat::transform_anthropic_to_openai(
-                anthropic_response,
+                converted_anthropic_response,
                 model,
             );
 

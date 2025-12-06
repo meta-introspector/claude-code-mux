@@ -73,8 +73,8 @@ impl GeminiProvider {
             } else if project_id.is_some() && location.is_some() {
                 // Vertex AI
                 format!(
-                    "https://{}-aiplatform.googleapis.com/v1",
-                    location.as_ref().unwrap()
+                    "https://{loc}-aiplatform.googleapis.com/v1",
+                    loc = location.as_ref().unwrap()
                 )
             } else {
                 // Google AI (API Key)
@@ -375,7 +375,7 @@ impl GeminiProvider {
             
             // Check if it's a 429 error
             if response.status().as_u16() == 429 {
-                let error_text = response.text().await.unwrap_or_default();
+                let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
                 
                 // Try to extract retry delay
                 if let Some(delay) = extract_retry_delay(&error_text) {
@@ -503,12 +503,10 @@ impl AnthropicProvider for GeminiProvider {
                 if status == 404 {
                     let model_name = &model;
                     let user_friendly_msg = if model_name.contains("gemini-3") || model_name.contains("preview") {
-                        format!(
-                            "Model '{}' is not available. This may be a preview model that requires special access. \n                            Try using gemini-2.5-pro or gemini-2.0-flash-exp instead. \n                            Original error: {}",
-                            model_name, error_text
-                        )
+                        format!("Model '{}' is not available. This may be a preview model that requires special access. Try using gemini-2.5-pro or gemini-2.0-flash-exp instead. Original error: {}", model_name, error_text)
                     } else {
-                        format!("Model '{}' not found. Original error: {}", model_name, error_text)
+                        let user_friendly_msg = format!("Model '{}' not found. Original error: {}", model_name, error_text);
+                        user_friendly_msg
                     };
                     tracing::warn!("⚠️ Model not found (404): {}", user_friendly_msg);
                     return Err(ProviderError::ApiError {
@@ -678,7 +676,6 @@ impl AnthropicProvider for GeminiProvider {
             }
 
             // Return the streaming response
-            // The Gemini API returns SSE format, just pass through the stream
             let stream = response.bytes_stream().map_err(|e| ProviderError::HttpError(e));
             Ok(Box::pin(stream))
         } else {

@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::collections::HashMap; // Added HashMap import
 use anyhow::{Context, Result};
 use crate::providers::ProviderConfig;
+use crate::auth::OAuthConfig; // Added OAuthConfig import
+use url::Url; // Added Url import
 
 /// Application configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -13,6 +16,8 @@ pub struct AppConfig {
     pub providers: Vec<ProviderConfig>,
     #[serde(default)]
     pub models: Vec<ModelConfig>,
+    #[serde(default)]
+    pub oauth: HashMap<String, OAuthConfig>, // Added oauth field
 }
 
 impl Default for AppConfig {
@@ -22,6 +27,7 @@ impl Default for AppConfig {
             router: RouterConfig::default(),
             providers: Vec::new(),
             models: Vec::new(),
+            oauth: HashMap::new(), // Initialize oauth field
         }
     }
 }
@@ -38,6 +44,8 @@ pub struct ServerConfig {
     pub log_level: String,
     #[serde(default)]
     pub timeouts: TimeoutConfig,
+    #[serde(default = "default_public_url")]
+    pub public_url: Url, // Added public_url field
 }
 
 impl Default for ServerConfig {
@@ -48,8 +56,13 @@ impl Default for ServerConfig {
             api_key: None,
             log_level: default_log_level(),
             timeouts: TimeoutConfig::default(),
+            public_url: default_public_url(), // Initialize public_url
         }
     }
+}
+
+fn default_public_url() -> Url {
+    Url::parse("http://127.0.0.1:13456").unwrap()
 }
 
 fn default_port() -> u16 {
@@ -273,33 +286,97 @@ default = "placeholder-model"
 "#.to_string()
     }
 
-    /// Resolve environment variables in configuration
+    /// Resolve environment variables in configuration, with canonical names taking precedence.
     fn resolve_env_vars(&mut self) -> Result<()> {
-        // Resolve server API key
-        if let Some(ref key) = self.server.api_key {
-            if key.starts_with('$') {
-                let env_var = &key[1..];
-                self.server.api_key = std::env::var(env_var).ok();
-            }
+        // --- Canonical environment variables for router ---
+        if let Ok(val) = std::env::var("CCM_ROUTER_DEFAULT") {
+            self.router.default = val;
+        }
+        if let Ok(val) = std::env::var("CCM_ROUTER_BACKGROUND") {
+            self.router.background = Some(val);
+        }
+        if let Ok(val) = std::env::var("CCM_ROUTER_THINK") {
+            self.router.think = Some(val);
+        }
+        if let Ok(val) = std::env::var("CCM_ROUTER_WEBSEARCH") {
+            self.router.websearch = Some(val);
         }
 
-        // Resolve provider API keys (only for enabled providers)
+        self.providers.extend(new_providers);
+
+        // --- Discover and add new models from environment variables ---
+        let mut new_models = Vec::new();
+        for j in 0..10 { // Check for up to 10 dynamically defined models
+            let model_name_var = format!("CCM_MODEL_{}_NAME", j);
+
+            if let Ok(model_name) = std::env::var(&model_name_var) {
+                let mut mappings = Vec::new();
+                for k in 0..5 { // Check for up to 5 mappings per model
+                    let mapping_provider_var = format!("CCM_MODEL_{}_MAPPING_{}_PROVIDER", j, k);
+                    
+                    if let Ok(provider_name) = std::env::var(&mapping_provider_var) {
+                        let actual_model = std::env::var(format!("CCM_MODEL_{}_MAPPING_{}_ACTUAL_MODEL", j, k))
+                            .with_context(|| format!("Environment variable CCM_MODEL_{}_MAPPING_{}_ACTUAL_MODEL is required for model mapping", j, k))?;
+                        let priority = std::env::var(format!("CCM_MODEL_{}_MAPPING_{}_PRIORITY", j, k))
+                            .map(|s| s.parse::<u32>().unwrap_or(1))
+                            .unwrap_or(1);
+
+                        mappings.push(ModelMapping {
+                            priority,
+                            provider: provider_name,
+                            actual_model,
+                        });
+                    }
+                }
+                if !mappings.is_empty() {
+                    new_models.push(ModelConfig {
+                        name: model_name,
+                        mappings,
+                    });
+                }
+            }
+        }
+        self.models.extend(new_models);
+
+        // --- Canonical and legacy environment variables for providers ---
         for provider in &mut self.providers {
-            // Skip disabled providers
             if !provider.is_enabled() {
                 continue;
             }
 
-            // Only resolve env vars for API key auth
-            if let Some(ref api_key) = provider.api_key {
-                if api_key.starts_with('$') {
-                    let env_var = &api_key[1..];
-                    if let Ok(value) = std::env::var(env_var) {
-                        provider.api_key = Some(value);
-                    } else {
-                        anyhow::bail!("Environment variable {} not found for provider {}", env_var, provider.name);
+            // Canonical naming: CCM_PROVIDER_<PROVIDER_NAME>_API_KEY
+            let canonical_api_key_var = format!("CCM_PROVIDER_{}_API_KEY", provider.name.to_uppercase().replace('-', "_"));
+            let canonical_base_url_var = format!("CCM_PROVIDER_{}_BASE_URL", provider.name.to_uppercase().replace('-', "_"));
+            
+            let mut key_found = false;
+            if let Ok(val) = std::env::var(&canonical_api_key_var) {
+                provider.api_key = Some(val);
+                key_found = true;
+            }
+            if let Ok(val) = std::env::var(&canonical_base_url_var) {
+                provider.base_url = Some(val);
+            }
+
+            // Legacy '$' syntax (only if canonical not found for api_key)
+            if !key_found {
+                if let Some(ref api_key) = provider.api_key {
+                    if api_key.starts_with('$') {
+                        let env_var = &api_key[1..];
+                        if let Ok(value) = std::env::var(env_var) {
+                            provider.api_key = Some(value);
+                        } else {
+                            anyhow::bail!("Environment variable {} not found for provider {}", env_var, provider.name);
+                        }
                     }
                 }
+            }
+        }
+        
+        // --- Legacy server API key for backward compatibility ---
+        if let Some(ref key) = self.server.api_key {
+            if key.starts_with('$') {
+                let env_var = &key[1..];
+                self.server.api_key = std::env::var(env_var).ok();
             }
         }
 

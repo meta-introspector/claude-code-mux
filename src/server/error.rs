@@ -44,3 +44,15 @@ impl Display for AppError {
 }
 
 impl Error for AppError {}
+
+impl From<std::io::Error> for AppError {
+    fn from(err: std::io::Error) -> Self {
+        AppError::ProviderError(format!("I/O error: {}", err))
+    }
+}
+
+impl From<anyhow::Error> for AppError {
+    fn from(err: anyhow::Error) -> Self {
+        AppError::ProviderError(format!("Anyhow error: {}", err))
+    }
+}

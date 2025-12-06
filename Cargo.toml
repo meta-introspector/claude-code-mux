@@ -59,16 +59,11 @@ once_cell = "1"            # Lazy statics
 async-trait = "0.1"        # Async trait support
 dirs = "5"                 # User directories
 regex = "1"                # Regular expressions
-uuid = { version = "1", features = ["v4", "serde"] } # For request IDs
+uuid = { version = "1", features = ["v4", "serde"] }
+dotenv = "0.15"
 
-# OAuth & Auth
-oauth2 = { version = "4", features = ["openidconnect"] } # OAuth 2.0 client
-base64 = "0.22"            # Base64 encoding
-sha2 = "0.10"              # SHA-256 for PKCE
-rand = "0.8"               # Random generation for PKCE
-chrono = { version = "0.4", features = ["serde"] }  # Timestamps
-url = "2"                  # URL parsing
-async-stream = "0.3.6"
+# Plugin dependencies
+mcp_oauth_plugin = { path = "../plugins/mcp_oauth_plugin" }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", features = ["signal"] }  # Unix signals
@@ -97,8 +92,3 @@ opt-level = 0
 
 [profile.test]
 opt-level = 0
-
-[workspace]
-members = [ "code_editor",
-    "refactor_server_mod",
-]

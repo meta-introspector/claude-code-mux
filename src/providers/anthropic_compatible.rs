@@ -278,7 +278,7 @@ impl AnthropicProvider for AnthropicCompatibleProvider {
                 .header("anthropic-version", "2023-06-01")
                 .header("Content-Type", "application/json");
 
-            // Set auth header
+            // Set auth header based on OAuth vs API key
             if self.is_oauth() {
                 req_builder = req_builder
                     .header("Authorization", format!("Bearer {}", auth_value))
@@ -393,6 +393,7 @@ impl AnthropicProvider for AnthropicCompatibleProvider {
             let status = response.status().as_u16();
             let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
 
+            // If 401 and using OAuth, token might be invalid/expired
             if status == 401 && self.is_oauth() {
                 tracing::warn!("🔄 Received 401 on streaming, OAuth token may be invalid or expired");
             }
